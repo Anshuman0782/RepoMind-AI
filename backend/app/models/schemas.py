@@ -17,6 +17,10 @@ class CreateChatSessionRequest(BaseModel):
     title: str | None = Field(default=None, max_length=80)
 
 
+class UpdateChatSessionRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=80)
+
+
 class ChatSessionResponse(BaseModel):
     id: str
     project_id: str

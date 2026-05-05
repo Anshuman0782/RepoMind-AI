@@ -1,0 +1,16 @@
+C:\Users\USER\OneDrive\Documents\New : The term 'C:\Users\USER\OneDrive\Documents\New' is not recognized as the name 
+of a cmdlet, function, script file, or operable program. Check the spelling of the name, or if a path was included, 
+verify that the path is correct and try again.
+At line:1 char:19
++ $env:UV_CACHE_DIR=C:\Users\USER\OneDrive\Documents\New project 2\back ...
++                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (C:\Users\USER\OneDrive\Documents\New:String) [], CommandNotFoundExcepti 
+   on
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+INFO:     Will watch for changes in these directories: ['C:\\Users\\USER\\OneDrive\\Documents\\New project 2\\backend']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [28640] using WatchFiles
+INFO:     Started server process [24248]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.

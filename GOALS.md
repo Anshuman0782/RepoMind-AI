@@ -9,6 +9,7 @@
 - Ask questions about a selected project.
 - Show answers with collapsible source references.
 - Persist chat messages in MongoDB so refresh does not erase history.
+✅
 
 ## Next Goal 2: Multiple Chats Per Project
 
@@ -16,13 +17,13 @@ Create separate chat sessions under each project so conversations do not become 
 
 Planned work:
 
-- Add a `chats` MongoDB collection.
-- Create a new chat under a selected project.
-- Store messages with both `project_id` and `chat_id`.
-- Show chats under each project in the sidebar.
-- Switch between chats.
-- Auto-title a chat from the first question.
-- Keep old chat history after refresh.
+- Add a `chats` MongoDB collection. ✅
+- Create a new chat under a selected project. ✅
+- Store messages with both `project_id` and `chat_id`. ✅
+- Show chats under each project in the sidebar. ✅
+- Switch between chats. ✅
+- Auto-title a chat from the first question. ✅
+- Keep old chat history after refresh. ✅
 
 ## Goal 3: Chat Management And UI Polish
 

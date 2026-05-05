@@ -7,6 +7,14 @@ export type Project = {
   status: string;
 };
 
+export type ChatSession = {
+  id: string;
+  project_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ChatResponse = {
   answer: string;
   sources: {
@@ -20,6 +28,7 @@ export type ChatResponse = {
 export type ChatMessageResponse = ChatResponse & {
   id: string;
   project_id: string;
+  chat_id: string;
   question: string;
   created_at: string;
 };
@@ -46,11 +55,11 @@ export async function listProjects(): Promise<Project[]> {
   return response.json();
 }
 
-export async function sendMessage(projectId: string, message: string): Promise<ChatResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/chat`, {
+export async function createChatSession(projectId: string, title?: string): Promise<ChatSession> {
+  const response = await fetch(`${API_BASE_URL}/api/chat/projects/${projectId}/chats`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ project_id: projectId, message }),
+    body: JSON.stringify({ title }),
   });
 
   if (!response.ok) {
@@ -60,8 +69,65 @@ export async function sendMessage(projectId: string, message: string): Promise<C
   return response.json();
 }
 
-export async function listChatMessages(projectId: string): Promise<ChatMessageResponse[]> {
-  const response = await fetch(`${API_BASE_URL}/api/chat/${projectId}`);
+export async function listChatSessions(projectId: string): Promise<ChatSession[]> {
+  const response = await fetch(`${API_BASE_URL}/api/chat/projects/${projectId}/chats`);
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return response.json();
+}
+
+export async function renameChatSession(
+  projectId: string,
+  chatId: string,
+  title: string,
+): Promise<ChatSession> {
+  const response = await fetch(`${API_BASE_URL}/api/chat/projects/${projectId}/chats/${chatId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return response.json();
+}
+
+export async function deleteChatSession(projectId: string, chatId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/chat/projects/${projectId}/chats/${chatId}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+}
+
+export async function sendMessage(
+  projectId: string,
+  chatId: string,
+  message: string,
+): Promise<ChatResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ project_id: projectId, chat_id: chatId, message }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return response.json();
+}
+
+export async function listChatMessages(
+  projectId: string,
+  chatId: string,
+): Promise<ChatMessageResponse[]> {
+  const response = await fetch(`${API_BASE_URL}/api/chat/projects/${projectId}/chats/${chatId}/messages`);
   if (!response.ok) {
     throw new Error(await readApiError(response));
   }

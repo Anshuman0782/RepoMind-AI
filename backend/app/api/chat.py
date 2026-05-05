@@ -11,6 +11,7 @@ from app.models.schemas import (
     ChatSessionResponse,
     CreateChatSessionRequest,
     SourceChunk,
+    UpdateChatSessionRequest,
 )
 from app.services.llm_provider import LLMProviderError, generate_answer
 from app.services.vector_store import search_chunks
@@ -87,6 +88,40 @@ async def list_chat_sessions(project_id: str) -> list[ChatSessionResponse]:
     async for chat in cursor:
         chats.append(to_chat_session_response(chat))
     return chats
+
+
+@router.patch(
+    "/projects/{project_id}/chats/{chat_id}",
+    response_model=ChatSessionResponse,
+)
+async def update_chat_session(
+    project_id: str, chat_id: str, payload: UpdateChatSessionRequest
+) -> ChatSessionResponse:
+    now = utc_now()
+    result = await db.chats.update_one(
+        {"_id": chat_id, "project_id": project_id},
+        {
+            "$set": {
+                "title": title_from_question(payload.title),
+                "updated_at": now,
+            }
+        },
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    chat = await db.chats.find_one({"_id": chat_id, "project_id": project_id})
+    return to_chat_session_response(chat)
+
+
+@router.delete("/projects/{project_id}/chats/{chat_id}", status_code=204)
+async def delete_chat_session(project_id: str, chat_id: str) -> None:
+    chat_session = await db.chats.find_one({"_id": chat_id, "project_id": project_id})
+    if not chat_session:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    await db.chat_messages.delete_many({"project_id": project_id, "chat_id": chat_id})
+    await db.chats.delete_one({"_id": chat_id, "project_id": project_id})
 
 
 @router.post("", response_model=ChatResponse)
