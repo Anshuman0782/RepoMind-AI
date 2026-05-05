@@ -1,0 +1,17 @@
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+pydantic==2.7.4
+pydantic-settings==2.7.1
+
+motor==3.6.1
+
+python-dotenv==1.0.1
+python-multipart
+
+GitPython==3.1.44
+httpx==0.28.1
+
+google-genai
+groq==0.15.0

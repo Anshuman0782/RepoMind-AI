@@ -1,0 +1,5 @@
+# Optional phase-2 dependencies.
+# Install these after the basic MVP runs.
+langchain==0.3.14
+langgraph==0.2.62
+chromadb==0.6.3

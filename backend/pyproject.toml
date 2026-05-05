@@ -1,0 +1,30 @@
+[project]
+name = "repomind-backend"
+version = "0.1.0"
+description = "FastAPI backend for RepoMind AI."
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "pydantic-settings==2.7.1",
+    "motor==3.6.1",
+    "python-dotenv==1.0.1",
+    "gitpython==3.1.44",
+    "httpx==0.28.1",
+    "google-generativeai==0.8.3",
+    "groq==0.15.0",
+    "pydantic==2.7.4",
+    "python-multipart>=0.0.27",
+    "google-genai>=1.46.0",
+]
+
+[project.optional-dependencies]
+agent = [
+    "langchain==0.3.14",
+    "langgraph==0.2.62",
+    "chromadb==0.6.3",
+]
+
+[tool.uv]
+package = false
+

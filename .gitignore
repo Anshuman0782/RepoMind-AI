@@ -1,0 +1,14 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+node_modules/
+.next/
+dist/
+build/
+backend/data/repos/
+backend/data/chroma/
+frontend/.env.local
+frontend/next-dev.log
+.uv-cache/
