@@ -1,1 +1,58 @@
  ⚠ Port 3000 is in use by process 7480, using available port 3001 instead.
+ ⨯ ./app/page.tsx
+Error:   [31mx[0m Expected '</', got 'section'
+     ,-[[36;1;4mC:\Users\USER\OneDrive\Documents\New project 2\frontend\app\page.tsx[0m:852:1]
+ [2m849[0m |               {pendingAction === "ask" ? "Thinking..." : "Ask"}
+ [2m850[0m |             </button>
+ [2m851[0m |           </form>
+ [2m852[0m |         </section>
+     : [35;1m          ^^^^^^^[0m
+ [2m853[0m |       </div>
+ [2m854[0m |     </main>
+ [2m855[0m |   );
+     `----
+
+Caused by:
+    Syntax Error
+
+Import trace for requested module:
+./app/page.tsx
+ ⨯ Error: Could not find the module "C:\Users\USER\OneDrive\Documents\New project 2\frontend\node_modules\next\dist\next-devtools\userspace\app\segment-explorer-node.js#SegmentViewNode" in the React Client Manifest. This is probably a bug in the React Server Components bundler.
+    at stringify (<anonymous>) {
+  digest: '295809323'
+}
+ ⨯ Error: Could not find the module "C:\Users\USER\OneDrive\Documents\New project 2\frontend\node_modules\next\dist\next-devtools\userspace\app\segment-explorer-node.js#SegmentViewNode" in the React Client Manifest. This is probably a bug in the React Server Components bundler.
+    at stringify (<anonymous>)
+    at stringify (<anonymous>) {
+  digest: '1607686927'
+}
+ ⨯ Error: Could not find the module "C:\Users\USER\OneDrive\Documents\New project 2\frontend\node_modules\next\dist\next-devtools\userspace\app\segment-explorer-node.js#SegmentViewNode" in the React Client Manifest. This is probably a bug in the React Server Components bundler.
+    at stringify (<anonymous>)
+    at stringify (<anonymous>) {
+  digest: '1607686927'
+}
+ ⨯ Error: Could not find the module "C:\Users\USER\OneDrive\Documents\New project 2\frontend\node_modules\next\dist\next-devtools\userspace\app\segment-explorer-node.js#SegmentViewNode" in the React Client Manifest. This is probably a bug in the React Server Components bundler.
+    at stringify (<anonymous>)
+    at stringify (<anonymous>) {
+  digest: '1607686927'
+}
+ ⨯ Error: Could not find the module "C:\Users\USER\OneDrive\Documents\New project 2\frontend\node_modules\next\dist\next-devtools\userspace\app\segment-explorer-node.js#SegmentViewNode" in the React Client Manifest. This is probably a bug in the React Server Components bundler.
+    at stringify (<anonymous>) {
+  digest: '295809323'
+}
+ ⨯ Error: Could not find the module "C:\Users\USER\OneDrive\Documents\New project 2\frontend\node_modules\next\dist\next-devtools\userspace\app\segment-explorer-node.js#SegmentViewNode" in the React Client Manifest. This is probably a bug in the React Server Components bundler.
+    at stringify (<anonymous>) {
+  digest: '295809323'
+}
+ ⨯ [TypeError: __webpack_modules__[moduleId] is not a function] {
+  digest: '1203529319'
+}
+ ⨯ Error: Could not find the module "C:\Users\USER\OneDrive\Documents\New project 2\frontend\node_modules\next\dist\next-devtools\userspace\app\segment-explorer-node.js#SegmentViewNode" in the React Client Manifest. This is probably a bug in the React Server Components bundler.
+    at stringify (<anonymous>) {
+  digest: '295809323'
+}
+[TypeError: __webpack_modules__[moduleId] is not a function]
+ ⨯ [TypeError: __webpack_modules__[moduleId] is not a function]
+ ⨯ [TypeError: __webpack_modules__[moduleId] is not a function] {
+  page: '/'
+}

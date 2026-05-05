@@ -1,88 +1,148 @@
 # RepoMind AI Goal Stack
 
+RepoMind AI is moving from repo-aware chat toward a safe agentic coding assistant.
+
 ## Completed Goal 1: Repo Chat MVP
 
-- Import a public GitHub repository.
-- Store project metadata in MongoDB.
-- Scan and chunk repository files.
-- Build a local vector index for retrieval.
-- Ask questions about a selected project.
-- Show answers with collapsible source references.
-- Persist chat messages in MongoDB so refresh does not erase history.
-✅
+- [x] Import a public GitHub repository.
+- [x] Store project metadata in MongoDB.
+- [x] Scan and chunk repository files.
+- [x] Build a local vector index for retrieval.
+- [x] Ask questions about a selected project.
+- [x] Show answers with collapsible source references.
+- [x] Persist chat messages in MongoDB so refresh does not erase history.
 
-## Next Goal 2: Multiple Chats Per Project
+## Completed Goal 2: Multiple Chats Per Project
 
-Create separate chat sessions under each project so conversations do not become one long thread.
+- [x] Add a `chats` MongoDB collection.
+- [x] Create a new chat under a selected project.
+- [x] Store messages with both `project_id` and `chat_id`.
+- [x] Show chats under each project in the sidebar.
+- [x] Switch between chats.
+- [x] Auto-title a chat from the first question.
+- [x] Keep old chat history after refresh.
 
-Planned work:
+## Completed Goal 3: Chat Management And UI Polish
 
-- Add a `chats` MongoDB collection. ✅
-- Create a new chat under a selected project. ✅
-- Store messages with both `project_id` and `chat_id`. ✅
-- Show chats under each project in the sidebar. ✅
-- Switch between chats. ✅
-- Auto-title a chat from the first question. ✅
-- Keep old chat history after refresh. ✅
+- [x] Delete chat from MongoDB.
+- [x] Rename chat.
+- [x] Delete project from MongoDB.
+- [x] Clean up project chats and messages when a project is deleted.
+- [x] Improve responsive layout.
+- [x] Add better loading states.
+- [x] Add auto-scroll to latest answer.
+- [x] Improve empty states.
+- [x] Clean up source reference display.
 
-## Goal 3: Chat Management And UI Polish
+## Completed Goal 4: File Explorer And Codebase Tools
 
-Planned work:
+Build the inspection layer the agents will use before planning or editing.
 
-- Delete chat.
-- Rename chat.
-- Delete project later if needed.
-- Improve responsive layout.
-- Add better loading states.
-- Add auto-scroll to latest answer.
-- Improve empty states.
-- Clean up source reference display.
-
-## Goal 4: File Explorer And Codebase Tools
-
-Planned work:
-
-- Add file explorer for each imported project.
-- View file contents.
-- Search files.
-- Add safe backend tools:
+- [x] Add file explorer for each imported project.
+- [x] View file contents.
+- [x] Search files.
+- [x] Add safe backend tools:
   - `list_files`
   - `read_file`
   - `search_code`
-  - `create_file`
-  - `edit_file`
   - `get_git_diff`
+- [x] Keep write tools out of this goal unless the UI is ready for approval flows.
 
-## Goal 5: Codebase Change Agent
+## Next Goal 5: Repo Navigator And Investigation Agent
 
-Build an AI agent that helps manage a codebase.
+Help users understand a repository without editing it.
 
-Main behavior:
+Planned work:
 
-- User asks to create a new file or feature.
-- Agent analyzes the project structure.
-- Agent suggests the correct file location.
-- Agent suggests required related changes such as imports, routes, exports, or integrations.
-- Agent shows a change plan before editing.
-- User approves the change plan.
-- Agent creates or modifies files.
-- App shows a diff preview.
-- Agent asks permission to commit.
-- If approved, agent runs git add and git commit with a meaningful commit message.
+- Add a repo navigator mode.
+- Answer questions like "where is auth handled?" with files, symbols, and evidence.
+- Add bug investigation flow:
+  - user describes a bug
+  - agent searches relevant files
+  - agent forms likely causes
+  - agent shows evidence and suggested fix locations
+- Save investigation summaries into the active chat.
+
+## Goal 6: Change Planner Agent
+
+Turn a user request into an implementation plan before any file is edited.
+
+Planned work:
+
+- User asks for a feature, fix, refactor, or file change.
+- Agent analyzes project structure and relevant files.
+- Agent proposes:
+  - files to create or edit
+  - reason for each change
+  - expected risks
+  - suggested tests
+- User must approve the plan before moving to edits.
+- No file modifications in this goal.
+
+## Goal 7: Safe Code Editing Agent
+
+Apply approved changes with strict human control.
 
 Safety rules:
 
 - Never edit files without user approval.
 - Never commit without user approval.
-- Always show the proposed file path and related changes first.
-- Always show the diff before commit.
-- Use a meaningful commit message based on the actual changes.
+- Keep edits scoped to the imported project directory.
+- Always show proposed file paths before editing.
+- Always show a diff after editing.
 
-Recommended implementation:
+Planned work:
 
-- Use LangGraph for the multi-step workflow.
-- Add human approval checkpoints.
-- Keep git operations scoped to the imported project directory.
-- Start with local commits only.
+- Add approved write tools:
+  - `create_file`
+  - `edit_file`
+  - `delete_file`
+- Add diff preview UI.
+- Add apply/reject flow.
+- Add rollback for the current proposed change set.
+- Start with local file edits only.
+
+## Goal 8: Test Writer And Code Review Agent
+
+Improve confidence after changes.
+
+Planned work:
+
+- Generate tests for changed files or selected features.
+- Review diffs for bugs, regressions, risky patterns, and missing validation.
+- Suggest test commands based on project type.
+- Summarize residual risks.
+- Optionally run tests after user approval.
+
+## Goal 9: Documentation Agent
+
+Make repositories easier to understand and maintain.
+
+Planned work:
+
+- Generate architecture summaries.
+- Generate README improvements.
+- Generate API docs and setup notes.
+- Generate onboarding guides.
+- Add "explain this file/module" from file explorer.
+
+## Goal 10: Commit And PR Assistant
+
+Help finish a change professionally.
+
+Planned work:
+
+- Read the current git diff.
+- Generate a meaningful commit message.
+- Ask permission before committing.
+- Create local commits only at first.
+- Generate PR title and description.
 - Add branch and pull request creation later.
 
+## Future Ideas
+
+- Dependency upgrade agent.
+- Architecture map visualization.
+- Security review mode.
+- Performance review mode.
+- Multi-repo workspace support.

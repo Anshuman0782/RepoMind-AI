@@ -33,6 +33,26 @@ export type ChatMessageResponse = ChatResponse & {
   created_at: string;
 };
 
+export type FileEntry = {
+  path: string;
+  name: string;
+  size: number;
+  modified_at: number;
+};
+
+export type FileContent = {
+  path: string;
+  content: string;
+  size: number;
+  line_count: number;
+};
+
+export type CodeSearchResult = {
+  file_path: string;
+  line_number: number;
+  line: string;
+};
+
 export async function createProject(name: string, repoUrl: string): Promise<Project> {
   const response = await fetch(`${API_BASE_URL}/api/projects`, {
     method: "POST",
@@ -53,6 +73,54 @@ export async function listProjects(): Promise<Project[]> {
     throw new Error(await readApiError(response));
   }
   return response.json();
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+}
+
+export async function listProjectFiles(projectId: string): Promise<FileEntry[]> {
+  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/files`);
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return response.json();
+}
+
+export async function readProjectFile(projectId: string, path: string): Promise<FileContent> {
+  const params = new URLSearchParams({ path });
+  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/files/content?${params}`);
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return response.json();
+}
+
+export async function searchProjectCode(
+  projectId: string,
+  query: string,
+): Promise<CodeSearchResult[]> {
+  const params = new URLSearchParams({ query, limit: "100" });
+  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/search?${params}`);
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return response.json();
+}
+
+export async function getProjectGitDiff(projectId: string): Promise<string> {
+  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/git-diff`);
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  const payload = (await response.json()) as { diff: string };
+  return payload.diff;
 }
 
 export async function createChatSession(projectId: string, title?: string): Promise<ChatSession> {

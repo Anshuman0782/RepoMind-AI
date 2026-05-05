@@ -13,6 +13,30 @@ class ProjectResponse(BaseModel):
     status: str
 
 
+class FileEntryResponse(BaseModel):
+    path: str
+    name: str
+    size: int
+    modified_at: float
+
+
+class FileContentResponse(BaseModel):
+    path: str
+    content: str
+    size: int
+    line_count: int
+
+
+class CodeSearchResultResponse(BaseModel):
+    file_path: str
+    line_number: int
+    line: str
+
+
+class GitDiffResponse(BaseModel):
+    diff: str
+
+
 class CreateChatSessionRequest(BaseModel):
     title: str | None = Field(default=None, max_length=80)
 
