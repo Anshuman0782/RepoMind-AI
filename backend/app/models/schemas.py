@@ -13,8 +13,21 @@ class ProjectResponse(BaseModel):
     status: str
 
 
+class CreateChatSessionRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=80)
+
+
+class ChatSessionResponse(BaseModel):
+    id: str
+    project_id: str
+    title: str
+    created_at: str
+    updated_at: str
+
+
 class ChatRequest(BaseModel):
     project_id: str
+    chat_id: str
     message: str = Field(min_length=1)
 
 
@@ -33,6 +46,7 @@ class ChatResponse(BaseModel):
 class ChatMessageResponse(BaseModel):
     id: str
     project_id: str
+    chat_id: str
     question: str
     answer: str
     sources: list[SourceChunk]
