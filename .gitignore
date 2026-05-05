@@ -12,3 +12,4 @@ backend/data/chroma/
 frontend/.env.local
 frontend/next-dev.log
 .uv-cache/
+GOALS.md
