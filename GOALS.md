@@ -48,22 +48,20 @@ Build the inspection layer the agents will use before planning or editing.
   - `get_git_diff`
 - [x] Keep write tools out of this goal unless the UI is ready for approval flows.
 
-## Next Goal 5: Repo Navigator And Investigation Agent
+## Completed Goal 5: Repo Navigator And Investigation Agent
 
 Help users understand a repository without editing it.
 
-Planned work:
-
-- Add a repo navigator mode.
-- Answer questions like "where is auth handled?" with files, symbols, and evidence.
-- Add bug investigation flow:
+- [x] Add a repo navigator mode.
+- [x] Answer questions like "where is auth handled?" with files, symbols, and evidence.
+- [x] Add bug investigation flow:
   - user describes a bug
   - agent searches relevant files
   - agent forms likely causes
   - agent shows evidence and suggested fix locations
-- Save investigation summaries into the active chat.
+- [x] Save investigation summaries into the active chat.
 
-## Goal 6: Change Planner Agent
+## Next Goal 6: Change Planner Agent
 
 Turn a user request into an implementation plan before any file is edited.
 

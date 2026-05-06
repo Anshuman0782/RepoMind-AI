@@ -191,6 +191,30 @@ export async function sendMessage(
   return response.json();
 }
 
+export async function investigateCodebase(
+  projectId: string,
+  chatId: string,
+  message: string,
+  mode: "navigator" | "bug",
+): Promise<ChatResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/chat/investigate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      project_id: projectId,
+      chat_id: chatId,
+      message,
+      mode,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return response.json();
+}
+
 export async function listChatMessages(
   projectId: string,
   chatId: string,
