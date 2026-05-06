@@ -1,7 +1,6 @@
 INFO:     Will watch for changes in these directories: ['C:\\Users\\USER\\OneDrive\\Documents\\New project 2\\backend']
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [5664] using WatchFiles
-INFO:     Started server process [28444]
+INFO:     Started reloader process [26584] using WatchFiles
+INFO:     Started server process [4812]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-WARNING:  WatchFiles detected changes in 'app\api\projects.py'. Reloading...

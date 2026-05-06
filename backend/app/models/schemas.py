@@ -59,6 +59,13 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
 
 
+class InvestigationRequest(BaseModel):
+    project_id: str
+    chat_id: str
+    message: str = Field(min_length=1)
+    mode: str = Field(pattern="^(navigator|bug)$")
+
+
 class SourceChunk(BaseModel):
     file_path: str
     start_line: int

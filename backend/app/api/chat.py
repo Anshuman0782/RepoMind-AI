@@ -10,9 +10,11 @@ from app.models.schemas import (
     ChatResponse,
     ChatSessionResponse,
     CreateChatSessionRequest,
+    InvestigationRequest,
     SourceChunk,
     UpdateChatSessionRequest,
 )
+from app.services.investigation_service import investigate_codebase
 from app.services.llm_provider import LLMProviderError, generate_answer
 from app.services.vector_store import search_chunks
 
@@ -146,6 +148,44 @@ async def chat(payload: ChatRequest) -> ChatResponse:
             "project_id": payload.project_id,
             "chat_id": payload.chat_id,
             "question": payload.message,
+            "answer": answer,
+            "sources": [source.model_dump() for source in sources],
+            "created_at": now,
+        }
+    )
+    update_fields = {"updated_at": now}
+    existing_messages = await db.chat_messages.count_documents(
+        {"project_id": payload.project_id, "chat_id": payload.chat_id}
+    )
+    if existing_messages == 1 and chat_session["title"] == "New chat":
+        update_fields["title"] = title_from_question(payload.message)
+    await db.chats.update_one({"_id": payload.chat_id}, {"$set": update_fields})
+
+    return ChatResponse(answer=answer, sources=sources)
+
+
+@router.post("/investigate", response_model=ChatResponse)
+async def investigate(payload: InvestigationRequest) -> ChatResponse:
+    chat_session = await db.chats.find_one(
+        {"_id": payload.chat_id, "project_id": payload.project_id}
+    )
+    if not chat_session:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    answer, sources = await investigate_codebase(
+        payload.project_id,
+        payload.message,
+        payload.mode,
+    )
+    now = utc_now()
+    label = "Bug investigation" if payload.mode == "bug" else "Repo navigator"
+    question = f"{label}: {payload.message}"
+    await db.chat_messages.insert_one(
+        {
+            "_id": str(uuid4()),
+            "project_id": payload.project_id,
+            "chat_id": payload.chat_id,
+            "question": question,
             "answer": answer,
             "sources": [source.model_dump() for source in sources],
             "created_at": now,
