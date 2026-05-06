@@ -37,6 +37,24 @@ class GitDiffResponse(BaseModel):
     diff: str
 
 
+class FileEditOperation(BaseModel):
+    action: str = Field(pattern="^(create|edit|delete)$")
+    path: str = Field(min_length=1, max_length=500)
+    content: str | None = None
+
+
+class CreateEditChangeSetRequest(BaseModel):
+    operations: list[FileEditOperation] = Field(min_length=1, max_length=20)
+
+
+class EditChangeSetResponse(BaseModel):
+    id: str
+    project_id: str
+    status: str
+    files: list[str]
+    diff: str
+
+
 class CreateChatSessionRequest(BaseModel):
     title: str | None = Field(default=None, max_length=80)
 

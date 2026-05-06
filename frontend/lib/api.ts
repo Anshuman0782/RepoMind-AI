@@ -53,6 +53,20 @@ export type CodeSearchResult = {
   line: string;
 };
 
+export type FileEditOperation = {
+  action: "create" | "edit" | "delete";
+  path: string;
+  content?: string;
+};
+
+export type EditChangeSet = {
+  id: string;
+  project_id: string;
+  status: "pending" | "applied" | "rejected" | "rolled_back";
+  files: string[];
+  diff: string;
+};
+
 export async function createProject(name: string, repoUrl: string): Promise<Project> {
   const response = await fetch(`${API_BASE_URL}/api/projects`, {
     method: "POST",
@@ -121,6 +135,61 @@ export async function getProjectGitDiff(projectId: string): Promise<string> {
   }
   const payload = (await response.json()) as { diff: string };
   return payload.diff;
+}
+
+export async function createEditChangeSet(
+  projectId: string,
+  operations: FileEditOperation[],
+): Promise<EditChangeSet> {
+  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/edit-change-sets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operations }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return response.json();
+}
+
+export async function applyEditChangeSet(
+  projectId: string,
+  changeSetId: string,
+): Promise<EditChangeSet> {
+  return updateEditChangeSet(projectId, changeSetId, "apply");
+}
+
+export async function rejectEditChangeSet(
+  projectId: string,
+  changeSetId: string,
+): Promise<EditChangeSet> {
+  return updateEditChangeSet(projectId, changeSetId, "reject");
+}
+
+export async function rollbackEditChangeSet(
+  projectId: string,
+  changeSetId: string,
+): Promise<EditChangeSet> {
+  return updateEditChangeSet(projectId, changeSetId, "rollback");
+}
+
+async function updateEditChangeSet(
+  projectId: string,
+  changeSetId: string,
+  action: "apply" | "reject" | "rollback",
+): Promise<EditChangeSet> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/projects/${projectId}/edit-change-sets/${changeSetId}/${action}`,
+    { method: "POST" },
+  );
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return response.json();
 }
 
 export async function createChatSession(projectId: string, title?: string): Promise<ChatSession> {

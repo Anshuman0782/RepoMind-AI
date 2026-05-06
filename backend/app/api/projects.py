@@ -7,13 +7,21 @@ from app.core.config import settings
 from app.core.database import db
 from app.models.schemas import (
     CodeSearchResultResponse,
+    CreateEditChangeSetRequest,
     CreateProjectRequest,
+    EditChangeSetResponse,
     FileContentResponse,
     FileEntryResponse,
     GitDiffResponse,
     ProjectResponse,
 )
 from app.services.codebase_tools import get_git_diff, list_files, read_file, search_code
+from app.services.editing_tools import (
+    apply_edit_change_set,
+    create_edit_change_set,
+    reject_edit_change_set,
+    rollback_edit_change_set,
+)
 from app.services.repo_service import create_project
 from app.services.vector_store import index_path
 
@@ -85,6 +93,68 @@ async def search_project_code(
 async def read_project_git_diff(project_id: str) -> GitDiffResponse:
     try:
         return await get_git_diff(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{project_id}/edit-change-sets", response_model=EditChangeSetResponse)
+async def create_project_edit_change_set(
+    project_id: str,
+    payload: CreateEditChangeSetRequest,
+) -> EditChangeSetResponse:
+    try:
+        operations = [operation.model_dump() for operation in payload.operations]
+        return await create_edit_change_set(project_id, operations)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{project_id}/edit-change-sets/{change_set_id}/apply",
+    response_model=EditChangeSetResponse,
+)
+async def apply_project_edit_change_set(
+    project_id: str,
+    change_set_id: str,
+) -> EditChangeSetResponse:
+    try:
+        return await apply_edit_change_set(project_id, change_set_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{project_id}/edit-change-sets/{change_set_id}/reject",
+    response_model=EditChangeSetResponse,
+)
+async def reject_project_edit_change_set(
+    project_id: str,
+    change_set_id: str,
+) -> EditChangeSetResponse:
+    try:
+        return await reject_edit_change_set(project_id, change_set_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{project_id}/edit-change-sets/{change_set_id}/rollback",
+    response_model=EditChangeSetResponse,
+)
+async def rollback_project_edit_change_set(
+    project_id: str,
+    change_set_id: str,
+) -> EditChangeSetResponse:
+    try:
+        return await rollback_edit_change_set(project_id, change_set_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

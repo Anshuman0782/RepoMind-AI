@@ -7,9 +7,9 @@ node_modules/
 .next/
 dist/
 build/
+*.tsbuildinfo
 backend/data/repos/
 backend/data/chroma/
 frontend/.env.local
 frontend/next-dev.log
 .uv-cache/
-

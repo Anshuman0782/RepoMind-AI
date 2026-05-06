@@ -1,6 +1,4 @@
-INFO:     Will watch for changes in these directories: ['C:\\Users\\USER\\OneDrive\\Documents\\New project 2\\backend']
-INFO:     Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
-INFO:     Started reloader process [29324] using WatchFiles
-INFO:     Started server process [27824]
+INFO:     Started server process [14740]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)

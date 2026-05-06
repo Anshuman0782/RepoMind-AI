@@ -6,11 +6,15 @@ import {
   ChatSession,
   ChatMessageResponse,
   ChatResponse,
+  EditChangeSet,
+  FileEditOperation,
   FileContent,
   FileEntry,
   Project,
+  applyEditChangeSet,
   createChangePlan,
   createChatSession,
+  createEditChangeSet,
   createProject,
   deleteChatSession,
   deleteProject,
@@ -21,12 +25,15 @@ import {
   listProjectFiles,
   listProjects,
   readProjectFile,
+  rejectEditChangeSet,
   renameChatSession,
+  rollbackEditChangeSet,
   searchProjectCode,
   sendMessage,
 } from "@/lib/api";
 
-import { Send } from "lucide-react"
+import { Copy, Send } from "lucide-react";
+
 type ChatMessage = {
   id: string;
   question: string;
@@ -34,6 +41,110 @@ type ChatMessage = {
   sources: ChatResponse["sources"];
   createdAt: string;
 };
+
+type AnswerPart =
+  | {
+      type: "text";
+      content: string;
+    }
+  | {
+      type: "code";
+      language: string;
+      content: string;
+    };
+
+function parseAnswer(answer: string): AnswerPart[] {
+  const parts: AnswerPart[] = [];
+  const codeBlockPattern = /```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = codeBlockPattern.exec(answer)) !== null) {
+    const textBefore = answer.slice(lastIndex, match.index);
+    if (textBefore.trim()) {
+      parts.push({ type: "text", content: textBefore.trim() });
+    }
+    parts.push({
+      type: "code",
+      language: match[1]?.trim() || "code",
+      content: match[2].replace(/\n$/, ""),
+    });
+    lastIndex = match.index + match[0].length;
+  }
+
+  const remainingText = answer.slice(lastIndex);
+  if (remainingText.trim()) {
+    parts.push({ type: "text", content: remainingText.trim() });
+  }
+
+  return parts.length > 0 ? parts : [{ type: "text", content: answer }];
+}
+
+function renderInlineText(text: string) {
+  const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+  return tokens.map((token, index) => {
+    if (token.startsWith("`") && token.endsWith("`")) {
+      return (
+        <code key={`${token}:${index}`} className="rounded bg-panel px-1 py-0.5 text-[0.92em] text-ink">
+          {token.slice(1, -1)}
+        </code>
+      );
+    }
+    if (token.startsWith("**") && token.endsWith("**")) {
+      return (
+        <strong key={`${token}:${index}`} className="font-semibold text-ink">
+          {token.slice(2, -2)}
+        </strong>
+      );
+    }
+    return token;
+  });
+}
+
+function AnswerContent({ answer }: { answer: string }) {
+  const parts = parseAnswer(answer);
+
+  async function copyCode(content: string) {
+    await navigator.clipboard.writeText(content);
+  }
+
+  return (
+    <div className="space-y-3 leading-6 sm:leading-7">
+      {parts.map((part, index) => {
+        if (part.type === "code") {
+          return (
+            <div
+              key={`code:${index}`}
+              className="overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 text-zinc-100"
+            >
+              <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2 text-xs font-semibold text-zinc-300">
+                <span>{part.language}</span>
+                <button
+                  type="button"
+                  className="rounded p-1 text-zinc-300 transition hover:bg-zinc-800 hover:text-white"
+                  onClick={() => copyCode(part.content)}
+                  aria-label="Copy code"
+                  title="Copy code"
+                >
+                  <Copy size={16} />
+                </button>
+              </div>
+              <pre className="max-h-96 overflow-auto p-3 text-xs leading-5">
+                <code>{part.content}</code>
+              </pre>
+            </div>
+          );
+        }
+
+        return part.content.split(/\n{2,}/).map((paragraph, paragraphIndex) => (
+          <p key={`text:${index}:${paragraphIndex}`} className="whitespace-pre-wrap">
+            {renderInlineText(paragraph)}
+          </p>
+        ));
+      })}
+    </div>
+  );
+}
 
 function formatChatTime(value: string): string {
   return new Date(value).toLocaleTimeString([], {
@@ -77,10 +188,14 @@ export default function Home() {
   const [chatsByProject, setChatsByProject] = useState<Record<string, ChatSession[]>>({});
   const [messagesByChat, setMessagesByChat] = useState<Record<string, ChatMessage[]>>({});
   const [projectSearch, setProjectSearch] = useState("");
-  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "files" | "navigator" | "planner">("chat");
+  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "files" | "navigator" | "planner" | "editor">("chat");
   const [investigationMode, setInvestigationMode] = useState<"navigator" | "bug">("navigator");
   const [investigationPrompt, setInvestigationPrompt] = useState("");
   const [plannerPrompt, setPlannerPrompt] = useState("");
+  const [editAction, setEditAction] = useState<FileEditOperation["action"]>("edit");
+  const [editFilePath, setEditFilePath] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const [activeEditChangeSet, setActiveEditChangeSet] = useState<EditChangeSet | null>(null);
   const [filesByProject, setFilesByProject] = useState<Record<string, FileEntry[]>>({});
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [fileContentsByKey, setFileContentsByKey] = useState<Record<string, FileContent>>({});
@@ -97,6 +212,7 @@ export default function Home() {
   const [loadingMessagesChatId, setLoadingMessagesChatId] = useState("");
   const [loadingFilesProjectId, setLoadingFilesProjectId] = useState("");
   const [loadingFilePath, setLoadingFilePath] = useState("");
+  const [loadingEditFilePath, setLoadingEditFilePath] = useState("");
   const [error, setError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -438,6 +554,144 @@ export default function Home() {
     }
   }
 
+  function clearCachedFile(path: string) {
+    if (!selectedProjectId) {
+      return;
+    }
+    const fileKey = `${selectedProjectId}:${path}`;
+    setFileContentsByKey((current) => {
+      const next = { ...current };
+      delete next[fileKey];
+      return next;
+    });
+    setFilesByProject((current) => {
+      const next = { ...current };
+      delete next[selectedProjectId];
+      return next;
+    });
+  }
+
+  async function loadEditorFileContent(path = editFilePath, forceEdit = false) {
+    if (!selectedProjectId || (!forceEdit && editAction !== "edit")) {
+      return;
+    }
+
+    const trimmedPath = path.trim();
+    if (!trimmedPath) {
+      return;
+    }
+
+    setLoadingEditFilePath(trimmedPath);
+    setError("");
+    try {
+      const fileKey = `${selectedProjectId}:${trimmedPath}`;
+      const cachedContent = fileContentsByKey[fileKey];
+      if (cachedContent) {
+        setEditContent(cachedContent.content);
+        return;
+      }
+
+      const content = await readProjectFile(selectedProjectId, trimmedPath);
+      setEditContent(content.content);
+      setFileContentsByKey((current) => ({
+        ...current,
+        [fileKey]: content,
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load file content");
+    } finally {
+      setLoadingEditFilePath("");
+    }
+  }
+
+  async function handleCreateEditPreview(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedProjectId) {
+      setError("Create or select a project first.");
+      return;
+    }
+
+    const path = editFilePath.trim();
+    if (!path) {
+      setError("Choose a file path before creating a preview.");
+      return;
+    }
+
+    const operation: FileEditOperation =
+      editAction === "delete"
+        ? { action: editAction, path }
+        : { action: editAction, path, content: editContent };
+
+    setPendingAction("edit-preview");
+    setError("");
+    setActiveEditChangeSet(null);
+    try {
+      const changeSet = await createEditChangeSet(selectedProjectId, [operation]);
+      setActiveEditChangeSet(changeSet);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create edit preview");
+    } finally {
+      setPendingAction("");
+    }
+  }
+
+  async function handleApplyEditChangeSet() {
+    if (!selectedProjectId || !activeEditChangeSet) {
+      return;
+    }
+
+    setPendingAction("edit-apply");
+    setError("");
+    try {
+      const updated = await applyEditChangeSet(selectedProjectId, activeEditChangeSet.id);
+      setActiveEditChangeSet(updated);
+      updated.files.forEach(clearCachedFile);
+      const diff = await getProjectGitDiff(selectedProjectId);
+      setGitDiff(diff || "No uncommitted changes.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to apply edit");
+    } finally {
+      setPendingAction("");
+    }
+  }
+
+  async function handleRejectEditChangeSet() {
+    if (!selectedProjectId || !activeEditChangeSet) {
+      return;
+    }
+
+    setPendingAction("edit-reject");
+    setError("");
+    try {
+      const updated = await rejectEditChangeSet(selectedProjectId, activeEditChangeSet.id);
+      setActiveEditChangeSet(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reject edit");
+    } finally {
+      setPendingAction("");
+    }
+  }
+
+  async function handleRollbackEditChangeSet() {
+    if (!selectedProjectId || !activeEditChangeSet) {
+      return;
+    }
+
+    setPendingAction("edit-rollback");
+    setError("");
+    try {
+      const updated = await rollbackEditChangeSet(selectedProjectId, activeEditChangeSet.id);
+      setActiveEditChangeSet(updated);
+      updated.files.forEach(clearCachedFile);
+      const diff = await getProjectGitDiff(selectedProjectId);
+      setGitDiff(diff || "No uncommitted changes.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to rollback edit");
+    } finally {
+      setPendingAction("");
+    }
+  }
+
   async function handleInvestigation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedProjectId) {
@@ -712,6 +966,7 @@ export default function Home() {
                         setSelectedFilePath("");
                         setSearchResults([]);
                         setGitDiff("");
+                        setActiveEditChangeSet(null);
                         setError("");
                       }}
                     >
@@ -901,6 +1156,16 @@ export default function Home() {
             >
               Planner
             </button>
+            <button
+              type="button"
+              className={`flex-1 rounded px-3 py-2 font-medium transition ${
+                workspaceMode === "editor" ? "bg-white text-ink shadow-sm" : "text-zinc-600 hover:text-ink"
+              }`}
+              onClick={() => setWorkspaceMode("editor")}
+              disabled={!selectedProjectId}
+            >
+              Editor
+            </button>
           </div>
 
           {workspaceMode === "chat" ? (
@@ -929,7 +1194,7 @@ export default function Home() {
                           </span>
                         ) : null}
                       </div>
-                      <p className="whitespace-pre-wrap leading-6 sm:leading-7">{item.answer}</p>
+                      <AnswerContent answer={item.answer} />
 
                       {item.sources.length > 0 ? (
                         <details className="mt-4 rounded-md border border-line bg-panel">
@@ -1219,6 +1484,176 @@ export default function Home() {
                     </span>
                   </div>
                 ) : null}
+              </div>
+            </div>
+          ) : workspaceMode === "editor" ? (
+            <div className="min-h-0 flex-1 overflow-y-auto py-4">
+              <div className="mx-auto grid max-w-5xl gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                <form className="rounded-md border border-line bg-white p-4 sm:p-5" onSubmit={handleCreateEditPreview}>
+                  <div className="grid gap-3">
+                    <div>
+                      <label className="text-xs font-semibold uppercase text-zinc-500">Action</label>
+                      <div className="mt-2 grid grid-cols-3 rounded-md border border-line bg-panel p-1 text-sm">
+                        {(["edit", "create", "delete"] as const).map((action) => (
+                          <button
+                            key={action}
+                            type="button"
+                            className={`rounded px-3 py-2 font-medium capitalize transition ${
+                              editAction === action ? "bg-white text-ink shadow-sm" : "text-zinc-600 hover:text-ink"
+                            }`}
+                            onClick={() => {
+                              setEditAction(action);
+                              setActiveEditChangeSet(null);
+                              if (action === "create") {
+                                setEditContent("");
+                              }
+                              if (action === "edit") {
+                                void loadEditorFileContent(editFilePath, true);
+                              }
+                            }}
+                          >
+                            {action}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-semibold uppercase text-zinc-500" htmlFor="edit-file-path">
+                        File path
+                      </label>
+                      <input
+                        id="edit-file-path"
+                        className="mt-2 w-full rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent"
+                        placeholder="src/example.ts"
+                        value={editFilePath}
+                        onChange={(event) => {
+                          setEditFilePath(event.target.value);
+                          setActiveEditChangeSet(null);
+                        }}
+                        onBlur={() => {
+                          void loadEditorFileContent();
+                        }}
+                        disabled={!selectedProjectId || busy}
+                        required
+                      />
+                    </div>
+
+                    {editAction !== "delete" ? (
+                      <div>
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <label className="text-xs font-semibold uppercase text-zinc-500" htmlFor="edit-content">
+                            Full file content
+                          </label>
+                          {editAction === "edit" ? (
+                            <button
+                              type="button"
+                              className="rounded-md border border-line px-2 py-1 text-xs font-medium text-ink hover:bg-panel disabled:opacity-60"
+                              onClick={() => {
+                                void loadEditorFileContent();
+                              }}
+                              disabled={!selectedProjectId || busy || !editFilePath.trim()}
+                            >
+                              {loadingEditFilePath ? "Loading..." : "Load current file"}
+                            </button>
+                          ) : null}
+                        </div>
+                        <textarea
+                          id="edit-content"
+                          className="mt-2 min-h-80 w-full resize-y rounded-md border border-line px-3 py-2 font-mono text-xs leading-5 outline-none focus:border-accent"
+                          placeholder={
+                            editAction === "edit"
+                              ? "Enter a file path above to load the current file..."
+                              : "Paste or write the complete file content to preview..."
+                          }
+                          value={editContent}
+                          onChange={(event) => setEditContent(event.target.value)}
+                          disabled={!selectedProjectId || busy || Boolean(loadingEditFilePath)}
+                          required
+                        />
+                      </div>
+                    ) : null}
+
+                    <button
+                      className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                      disabled={busy || !selectedProjectId}
+                    >
+                      {pendingAction === "edit-preview" ? "Creating preview..." : "Preview diff"}
+                    </button>
+                  </div>
+                </form>
+
+                <div className="rounded-md border border-line bg-white p-4 sm:p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-semibold text-ink">Change set</h3>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        Preview first, then apply only after approval.
+                      </p>
+                    </div>
+                    {activeEditChangeSet ? (
+                      <span className="rounded bg-panel px-2 py-1 text-xs font-medium uppercase text-zinc-600">
+                        {activeEditChangeSet.status.replace("_", " ")}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  {activeEditChangeSet ? (
+                    <div className="mt-4 space-y-3">
+                      <div className="rounded-md border border-line bg-panel p-3">
+                        <p className="text-xs font-semibold uppercase text-zinc-500">Proposed files</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {activeEditChangeSet.files.map((file) => (
+                            <span key={file} className="rounded bg-white px-2 py-1 text-xs text-zinc-700">
+                              {file}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <pre className="max-h-[420px] overflow-auto rounded-md bg-zinc-950 p-3 text-xs leading-5 text-zinc-100">
+                        <code>{activeEditChangeSet.diff || "No diff available."}</code>
+                      </pre>
+
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        {activeEditChangeSet.status === "pending" ? (
+                          <>
+                            <button
+                              type="button"
+                              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                              onClick={handleApplyEditChangeSet}
+                              disabled={busy}
+                            >
+                              {pendingAction === "edit-apply" ? "Applying..." : "Apply approved edit"}
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-md border border-line px-4 py-2 text-sm font-medium text-ink hover:bg-panel disabled:opacity-60"
+                              onClick={handleRejectEditChangeSet}
+                              disabled={busy}
+                            >
+                              {pendingAction === "edit-reject" ? "Rejecting..." : "Reject"}
+                            </button>
+                          </>
+                        ) : null}
+                        {activeEditChangeSet.status === "applied" ? (
+                          <button
+                            type="button"
+                            className="rounded-md border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+                            onClick={handleRollbackEditChangeSet}
+                            disabled={busy}
+                          >
+                            {pendingAction === "edit-rollback" ? "Rolling back..." : "Rollback change set"}
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-4 rounded-md border border-dashed border-line bg-panel p-5 text-sm leading-6 text-zinc-600">
+                      Create a preview to see the exact paths and diff before any local file is touched.
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           ) : (
