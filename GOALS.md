@@ -61,21 +61,21 @@ Help users understand a repository without editing it.
   - agent shows evidence and suggested fix locations
 - [x] Save investigation summaries into the active chat.
 
-## Next Goal 6: Change Planner Agent
+## Completed Goal 6: Change Planner Agent
 
 Turn a user request into an implementation plan before any file is edited.
 
 Planned work:
 
-- User asks for a feature, fix, refactor, or file change.
-- Agent analyzes project structure and relevant files.
-- Agent proposes:
+- [x] User asks for a feature, fix, refactor, or file change.
+- [x] Agent analyzes project structure and relevant files.
+- [x] Agent proposes:
   - files to create or edit
   - reason for each change
   - expected risks
   - suggested tests
-- User must approve the plan before moving to edits.
-- No file modifications in this goal.
+- [x] User must approve the plan before moving to edits.
+- [x] No file modifications in this goal.
 
 ## Goal 7: Safe Code Editing Agent
 

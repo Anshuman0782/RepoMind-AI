@@ -9,6 +9,7 @@ import {
   FileContent,
   FileEntry,
   Project,
+  createChangePlan,
   createChatSession,
   createProject,
   deleteChatSession,
@@ -76,9 +77,10 @@ export default function Home() {
   const [chatsByProject, setChatsByProject] = useState<Record<string, ChatSession[]>>({});
   const [messagesByChat, setMessagesByChat] = useState<Record<string, ChatMessage[]>>({});
   const [projectSearch, setProjectSearch] = useState("");
-  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "files" | "navigator">("chat");
+  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "files" | "navigator" | "planner">("chat");
   const [investigationMode, setInvestigationMode] = useState<"navigator" | "bug">("navigator");
   const [investigationPrompt, setInvestigationPrompt] = useState("");
+  const [plannerPrompt, setPlannerPrompt] = useState("");
   const [filesByProject, setFilesByProject] = useState<Record<string, FileEntry[]>>({});
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [fileContentsByKey, setFileContentsByKey] = useState<Record<string, FileContent>>({});
@@ -510,6 +512,74 @@ export default function Home() {
     }
   }
 
+  async function handleChangePlan(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedProjectId) {
+      setError("Create or select a project first.");
+      return;
+    }
+
+    const submittedPrompt = plannerPrompt.trim();
+    if (!submittedPrompt) {
+      return;
+    }
+
+    setPendingAction("plan-change");
+    setPendingQuestion(submittedPrompt);
+    setError("");
+    setPlannerPrompt("");
+    try {
+      let activeChatId = selectedChatId;
+      if (!activeChatId) {
+        const chat = await createChatSession(selectedProjectId);
+        activeChatId = chat.id;
+        setSelectedChatId(chat.id);
+        setChatsByProject((current) => ({
+          ...current,
+          [selectedProjectId]: [chat, ...(current[selectedProjectId] ?? [])],
+        }));
+      }
+
+      const hadMessages = (messagesByChat[activeChatId] ?? []).length > 0;
+      const response = await createChangePlan(selectedProjectId, activeChatId, submittedPrompt);
+      const chatMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        question: `Change planner: ${submittedPrompt}`,
+        answer: response.answer,
+        sources: response.sources,
+        createdAt: new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      };
+      setMessagesByChat((current) => ({
+        ...current,
+        [activeChatId]: [...(current[activeChatId] ?? []), chatMessage],
+      }));
+      if (!hadMessages) {
+        setChatsByProject((current) => ({
+          ...current,
+          [selectedProjectId]: (current[selectedProjectId] ?? []).map((chat) =>
+            chat.id === activeChatId
+              ? {
+                  ...chat,
+                  title: titleFromQuestion(submittedPrompt),
+                  updated_at: new Date().toISOString(),
+                }
+              : chat,
+          ),
+        }));
+      }
+      setWorkspaceMode("chat");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create change plan");
+      setPlannerPrompt(submittedPrompt);
+    } finally {
+      setPendingAction("");
+      setPendingQuestion("");
+    }
+  }
+
   async function handleChat(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedProjectId) {
@@ -821,6 +891,16 @@ export default function Home() {
             >
               Navigator
             </button>
+            <button
+              type="button"
+              className={`flex-1 rounded px-3 py-2 font-medium transition ${
+                workspaceMode === "planner" ? "bg-white text-ink shadow-sm" : "text-zinc-600 hover:text-ink"
+              }`}
+              onClick={() => setWorkspaceMode("planner")}
+              disabled={!selectedProjectId}
+            >
+              Planner
+            </button>
           </div>
 
           {workspaceMode === "chat" ? (
@@ -859,7 +939,7 @@ export default function Home() {
                           <div className="grid gap-2 border-t border-line p-2 sm:p-3">
                             {item.sources.map((source, index) => (
                               <details
-                                key={`${item.id}:${source.file_path}:${source.start_line}`}
+                                key={`${item.id}:${source.file_path}:${source.start_line}:${source.end_line}:${index}`}
                                 className="rounded-md border border-line bg-white"
                               >
                                 <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-zinc-700">
@@ -1077,7 +1157,7 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          ) : (
+          ) : workspaceMode === "navigator" ? (
             <div className="min-h-0 flex-1 overflow-y-auto py-4">
               <div className="mx-auto max-w-3xl rounded-md border border-line bg-white p-4 sm:p-5">
                 <div className="flex rounded-md border border-line bg-panel p-1 text-sm">
@@ -1133,6 +1213,45 @@ export default function Home() {
 
                 {currentMessages.length > 0 ? (
                   <div className="mt-5 rounded-md border border-line bg-panel p-3 text-sm text-zinc-600">
+                    Latest saved result:{" "}
+                    <span className="font-medium text-ink">
+                      {currentMessages[currentMessages.length - 1].question}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-y-auto py-4">
+              <div className="mx-auto max-w-3xl rounded-md border border-line bg-white p-4 sm:p-5">
+                <form className="space-y-3" onSubmit={handleChangePlan}>
+                  <textarea
+                    className="min-h-36 w-full resize-none rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent"
+                    placeholder="Describe the feature, fix, refactor, or file change you want planned..."
+                    value={plannerPrompt}
+                    onChange={(event) => setPlannerPrompt(event.target.value)}
+                    disabled={!selectedProjectId || busy}
+                    required
+                  />
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs leading-5 text-zinc-500">
+                      Plans are saved into chat. File edits stay locked behind approval.
+                    </p>
+                    <button
+                      className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                      disabled={busy || !selectedProjectId}
+                    >
+                      {pendingAction === "plan-change" ? "Planning..." : "Create plan"}
+                    </button>
+                  </div>
+                </form>
+
+                <div className="mt-5 rounded-md border border-line bg-panel p-3 text-sm text-zinc-600">
+                  Approval gate: RepoMind will only propose files, risks, and tests in this goal.
+                </div>
+
+                {currentMessages.length > 0 ? (
+                  <div className="mt-3 rounded-md border border-line bg-panel p-3 text-sm text-zinc-600">
                     Latest saved result:{" "}
                     <span className="font-medium text-ink">
                       {currentMessages[currentMessages.length - 1].question}

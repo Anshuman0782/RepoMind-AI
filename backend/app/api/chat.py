@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.database import db
 from app.models.schemas import (
+    ChangePlanRequest,
     ChatMessageResponse,
     ChatRequest,
     ChatResponse,
@@ -16,6 +17,7 @@ from app.models.schemas import (
 )
 from app.services.investigation_service import investigate_codebase
 from app.services.llm_provider import LLMProviderError, generate_answer
+from app.services.planner_service import plan_change
 from app.services.vector_store import search_chunks
 
 
@@ -180,6 +182,39 @@ async def investigate(payload: InvestigationRequest) -> ChatResponse:
     now = utc_now()
     label = "Bug investigation" if payload.mode == "bug" else "Repo navigator"
     question = f"{label}: {payload.message}"
+    await db.chat_messages.insert_one(
+        {
+            "_id": str(uuid4()),
+            "project_id": payload.project_id,
+            "chat_id": payload.chat_id,
+            "question": question,
+            "answer": answer,
+            "sources": [source.model_dump() for source in sources],
+            "created_at": now,
+        }
+    )
+    update_fields = {"updated_at": now}
+    existing_messages = await db.chat_messages.count_documents(
+        {"project_id": payload.project_id, "chat_id": payload.chat_id}
+    )
+    if existing_messages == 1 and chat_session["title"] == "New chat":
+        update_fields["title"] = title_from_question(payload.message)
+    await db.chats.update_one({"_id": payload.chat_id}, {"$set": update_fields})
+
+    return ChatResponse(answer=answer, sources=sources)
+
+
+@router.post("/plan", response_model=ChatResponse)
+async def create_change_plan(payload: ChangePlanRequest) -> ChatResponse:
+    chat_session = await db.chats.find_one(
+        {"_id": payload.chat_id, "project_id": payload.project_id}
+    )
+    if not chat_session:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    answer, sources = await plan_change(payload.project_id, payload.message)
+    now = utc_now()
+    question = f"Change planner: {payload.message}"
     await db.chat_messages.insert_one(
         {
             "_id": str(uuid4()),

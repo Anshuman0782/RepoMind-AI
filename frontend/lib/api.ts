@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8001";
 
 export type Project = {
   id: string;
@@ -205,6 +205,28 @@ export async function investigateCodebase(
       chat_id: chatId,
       message,
       mode,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return response.json();
+}
+
+export async function createChangePlan(
+  projectId: string,
+  chatId: string,
+  message: string,
+): Promise<ChatResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/chat/plan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      project_id: projectId,
+      chat_id: chatId,
+      message,
     }),
   });
 
