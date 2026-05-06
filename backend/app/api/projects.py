@@ -167,6 +167,7 @@ async def delete_project(project_id: str) -> None:
 
     await db.chat_messages.delete_many({"project_id": project_id})
     await db.chats.delete_many({"project_id": project_id})
+    await db.edit_change_sets.delete_many({"project_id": project_id})
     await db.projects.delete_one({"_id": project_id})
 
     vector_path = index_path(project_id)

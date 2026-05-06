@@ -90,6 +90,13 @@ class ChangePlanRequest(BaseModel):
     message: str = Field(min_length=1)
 
 
+class CodeReviewRequest(BaseModel):
+    project_id: str
+    chat_id: str
+    message: str | None = Field(default=None, max_length=2000)
+    change_set_id: str | None = None
+
+
 class SourceChunk(BaseModel):
     file_path: str
     start_line: int

@@ -100,17 +100,17 @@ Planned work:
 - Add rollback for the current proposed change set.
 - Start with local file edits only.
 
-## Goal 8: Test Writer And Code Review Agent
+## Completed Goal 8: Test Writer And Code Review Agent
 
 Improve confidence after changes.
 
 Planned work:
 
-- Generate tests for changed files or selected features.
-- Review diffs for bugs, regressions, risky patterns, and missing validation.
-- Suggest test commands based on project type.
-- Summarize residual risks.
-- Optionally run tests after user approval.
+- [x] Generate tests for changed files or selected features.
+- [x] Review diffs for bugs, regressions, risky patterns, and missing validation.
+- [x] Suggest test commands based on project type.
+- [x] Summarize residual risks.
+- [x] Keep test execution approval-based by suggesting commands instead of running them automatically.
 
 ## Goal 9: Documentation Agent
 

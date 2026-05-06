@@ -30,6 +30,7 @@ import {
   rollbackEditChangeSet,
   searchProjectCode,
   sendMessage,
+  reviewCodeChanges,
 } from "@/lib/api";
 
 import { Copy, Send } from "lucide-react";
@@ -188,14 +189,17 @@ export default function Home() {
   const [chatsByProject, setChatsByProject] = useState<Record<string, ChatSession[]>>({});
   const [messagesByChat, setMessagesByChat] = useState<Record<string, ChatMessage[]>>({});
   const [projectSearch, setProjectSearch] = useState("");
-  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "files" | "navigator" | "planner" | "editor">("chat");
+  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "files" | "navigator" | "planner" | "editor" | "review">("chat");
   const [investigationMode, setInvestigationMode] = useState<"navigator" | "bug">("navigator");
   const [investigationPrompt, setInvestigationPrompt] = useState("");
   const [plannerPrompt, setPlannerPrompt] = useState("");
+  const [reviewPrompt, setReviewPrompt] = useState("");
   const [editAction, setEditAction] = useState<FileEditOperation["action"]>("edit");
   const [editFilePath, setEditFilePath] = useState("");
   const [editContent, setEditContent] = useState("");
   const [activeEditChangeSet, setActiveEditChangeSet] = useState<EditChangeSet | null>(null);
+  const [reviewSuggestionFiles, setReviewSuggestionFiles] = useState<string[]>([]);
+  const [reviewSuggestionChangeSetId, setReviewSuggestionChangeSetId] = useState("");
   const [filesByProject, setFilesByProject] = useState<Record<string, FileEntry[]>>({});
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [fileContentsByKey, setFileContentsByKey] = useState<Record<string, FileContent>>({});
@@ -625,6 +629,8 @@ export default function Home() {
     setPendingAction("edit-preview");
     setError("");
     setActiveEditChangeSet(null);
+    setReviewSuggestionFiles([]);
+    setReviewSuggestionChangeSetId("");
     try {
       const changeSet = await createEditChangeSet(selectedProjectId, [operation]);
       setActiveEditChangeSet(changeSet);
@@ -645,6 +651,8 @@ export default function Home() {
     try {
       const updated = await applyEditChangeSet(selectedProjectId, activeEditChangeSet.id);
       setActiveEditChangeSet(updated);
+      setReviewSuggestionFiles(updated.files);
+      setReviewSuggestionChangeSetId(updated.id);
       updated.files.forEach(clearCachedFile);
       const diff = await getProjectGitDiff(selectedProjectId);
       setGitDiff(diff || "No uncommitted changes.");
@@ -665,6 +673,8 @@ export default function Home() {
     try {
       const updated = await rejectEditChangeSet(selectedProjectId, activeEditChangeSet.id);
       setActiveEditChangeSet(updated);
+      setReviewSuggestionFiles([]);
+      setReviewSuggestionChangeSetId("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to reject edit");
     } finally {
@@ -682,6 +692,8 @@ export default function Home() {
     try {
       const updated = await rollbackEditChangeSet(selectedProjectId, activeEditChangeSet.id);
       setActiveEditChangeSet(updated);
+      setReviewSuggestionFiles([]);
+      setReviewSuggestionChangeSetId("");
       updated.files.forEach(clearCachedFile);
       const diff = await getProjectGitDiff(selectedProjectId);
       setGitDiff(diff || "No uncommitted changes.");
@@ -832,6 +844,90 @@ export default function Home() {
       setPendingAction("");
       setPendingQuestion("");
     }
+  }
+
+  async function runCodeReview(submittedPrompt: string, changeSetId?: string) {
+    if (!selectedProjectId) {
+      setError("Create or select a project first.");
+      return;
+    }
+
+    const reviewLabel = submittedPrompt || "Current diff";
+
+    setPendingAction("code-review");
+    setPendingQuestion(`Code review: ${reviewLabel}`);
+    setError("");
+    setReviewPrompt("");
+    try {
+      let activeChatId = selectedChatId;
+      if (!activeChatId) {
+        const chat = await createChatSession(selectedProjectId);
+        activeChatId = chat.id;
+        setSelectedChatId(chat.id);
+        setChatsByProject((current) => ({
+          ...current,
+          [selectedProjectId]: [chat, ...(current[selectedProjectId] ?? [])],
+        }));
+      }
+
+      const hadMessages = (messagesByChat[activeChatId] ?? []).length > 0;
+      const response = await reviewCodeChanges(
+        selectedProjectId,
+        activeChatId,
+        submittedPrompt,
+        changeSetId,
+      );
+      const chatMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        question: `Code review: ${reviewLabel}`,
+        answer: response.answer,
+        sources: response.sources,
+        createdAt: new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      };
+      setMessagesByChat((current) => ({
+        ...current,
+        [activeChatId]: [...(current[activeChatId] ?? []), chatMessage],
+      }));
+      if (!hadMessages) {
+        setChatsByProject((current) => ({
+          ...current,
+          [selectedProjectId]: (current[selectedProjectId] ?? []).map((chat) =>
+            chat.id === activeChatId
+              ? {
+                  ...chat,
+                  title: titleFromQuestion(reviewLabel),
+                  updated_at: new Date().toISOString(),
+                }
+              : chat,
+          ),
+        }));
+      }
+      setWorkspaceMode("chat");
+      setReviewSuggestionFiles([]);
+      setReviewSuggestionChangeSetId("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to review code changes");
+      setReviewPrompt(submittedPrompt);
+    } finally {
+      setPendingAction("");
+      setPendingQuestion("");
+    }
+  }
+
+  async function handleCodeReview(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await runCodeReview(reviewPrompt.trim());
+  }
+
+  async function handleSuggestedCodeReview() {
+    const fileList = reviewSuggestionFiles.join(", ");
+    const prompt = fileList
+      ? `Review the just-applied edit change set. Focus on these files: ${fileList}`
+      : "Review the just-applied edit change set.";
+    await runCodeReview(prompt, reviewSuggestionChangeSetId);
   }
 
   async function handleChat(event: FormEvent<HTMLFormElement>) {
@@ -1116,7 +1212,7 @@ export default function Home() {
             </div>
           ) : null}
 
-          <div className="mt-4 flex w-full rounded-md border border-line bg-panel p-1 text-sm">
+          <div className="mt-4 grid w-full grid-cols-2 rounded-md border border-line bg-panel p-1 text-sm sm:grid-cols-3 xl:grid-cols-6">
             <button
               type="button"
               className={`flex-1 rounded px-3 py-2 font-medium transition ${
@@ -1165,6 +1261,16 @@ export default function Home() {
               disabled={!selectedProjectId}
             >
               Editor
+            </button>
+            <button
+              type="button"
+              className={`flex-1 rounded px-3 py-2 font-medium transition ${
+                workspaceMode === "review" ? "bg-white text-ink shadow-sm" : "text-zinc-600 hover:text-ink"
+              }`}
+              onClick={() => setWorkspaceMode("review")}
+              disabled={!selectedProjectId}
+            >
+              Review
             </button>
           </div>
 
@@ -1647,6 +1753,40 @@ export default function Home() {
                           </button>
                         ) : null}
                       </div>
+
+                      {activeEditChangeSet.status === "applied" && reviewSuggestionFiles.length > 0 ? (
+                        <div className="rounded-md border border-accent/30 bg-accent/5 p-3">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="text-sm font-semibold text-ink">Review this change?</p>
+                              <p className="mt-1 text-xs leading-5 text-zinc-600">
+                                RepoMind can inspect the applied diff and suggest tests before you commit.
+                              </p>
+                            </div>
+                            <div className="flex flex-col gap-2 sm:flex-row">
+                              <button
+                                type="button"
+                                className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+                                onClick={handleSuggestedCodeReview}
+                                disabled={busy}
+                              >
+                                {pendingAction === "code-review" ? "Reviewing..." : "Review change"}
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded-md border border-line px-3 py-2 text-sm font-medium text-ink hover:bg-panel disabled:opacity-60"
+                                onClick={() => {
+                                  setReviewSuggestionFiles([]);
+                                  setReviewSuggestionChangeSetId("");
+                                }}
+                                disabled={busy}
+                              >
+                                Ignore
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   ) : (
                     <div className="mt-4 rounded-md border border-dashed border-line bg-panel p-5 text-sm leading-6 text-zinc-600">
@@ -1656,7 +1796,7 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          ) : (
+          ) : workspaceMode === "planner" ? (
             <div className="min-h-0 flex-1 overflow-y-auto py-4">
               <div className="mx-auto max-w-3xl rounded-md border border-line bg-white p-4 sm:p-5">
                 <form className="space-y-3" onSubmit={handleChangePlan}>
@@ -1683,6 +1823,44 @@ export default function Home() {
 
                 <div className="mt-5 rounded-md border border-line bg-panel p-3 text-sm text-zinc-600">
                   Approval gate: RepoMind will only propose files, risks, and tests in this goal.
+                </div>
+
+                {currentMessages.length > 0 ? (
+                  <div className="mt-3 rounded-md border border-line bg-panel p-3 text-sm text-zinc-600">
+                    Latest saved result:{" "}
+                    <span className="font-medium text-ink">
+                      {currentMessages[currentMessages.length - 1].question}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-y-auto py-4">
+              <div className="mx-auto max-w-3xl rounded-md border border-line bg-white p-4 sm:p-5">
+                <form className="space-y-3" onSubmit={handleCodeReview}>
+                  <textarea
+                    className="min-h-36 w-full resize-none rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent"
+                    placeholder="Optional: describe the changed feature, risk area, or test focus..."
+                    value={reviewPrompt}
+                    onChange={(event) => setReviewPrompt(event.target.value)}
+                    disabled={!selectedProjectId || busy}
+                  />
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-xs leading-5 text-zinc-500">
+                      Reviews inspect the current git diff and save findings into chat.
+                    </p>
+                    <button
+                      className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                      disabled={busy || !selectedProjectId}
+                    >
+                      {pendingAction === "code-review" ? "Reviewing..." : "Review changes"}
+                    </button>
+                  </div>
+                </form>
+
+                <div className="mt-5 rounded-md border border-line bg-panel p-3 text-sm text-zinc-600">
+                  Test commands are suggested only; run them after you approve the check.
                 </div>
 
                 {currentMessages.length > 0 ? (

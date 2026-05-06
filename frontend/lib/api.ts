@@ -306,6 +306,30 @@ export async function createChangePlan(
   return response.json();
 }
 
+export async function reviewCodeChanges(
+  projectId: string,
+  chatId: string,
+  message?: string,
+  changeSetId?: string,
+): Promise<ChatResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/chat/review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      project_id: projectId,
+      chat_id: chatId,
+      message: message || undefined,
+      change_set_id: changeSetId || undefined,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return response.json();
+}
+
 export async function listChatMessages(
   projectId: string,
   chatId: string,

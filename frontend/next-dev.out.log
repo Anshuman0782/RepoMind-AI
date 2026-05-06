@@ -3,16 +3,23 @@
 > next dev
 
    ▲ Next.js 15.5.9
-   - Local:        http://localhost:3000
-   - Network:      http://10.220.12.99:3000
+   - Local:        http://localhost:3001
+   - Network:      http://10.220.12.99:3001
 
  ✓ Starting...
- ✓ Ready in 4.5s
+ ✓ Ready in 4.3s
  ○ Compiling / ...
- ✓ Compiled / in 4.6s (569 modules)
- GET / 200 in 6063ms
- ✓ Compiled in 1413ms (244 modules)
- GET / 200 in 177ms
- GET / 200 in 119ms
- GET / 200 in 95ms
- GET / 200 in 87ms
+ ✓ Compiled / in 5.2s (569 modules)
+ GET / 200 in 6278ms
+ ✓ Compiled in 1071ms (244 modules)
+ ✓ Compiled in 6.2s (569 modules)
+ GET / 200 in 387ms
+ GET / 200 in 480ms
+ ✓ Compiled in 1131ms (569 modules)
+ GET / 200 in 191ms
+ ✓ Compiled in 2.9s (569 modules)
+ GET / 200 in 453ms
+ ✓ Compiled in 1145ms (569 modules)
+ GET / 200 in 405ms
+ ✓ Compiled in 1171ms (569 modules)
+ GET / 200 in 351ms
