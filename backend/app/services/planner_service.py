@@ -101,8 +101,6 @@ async def plan_change(project_id: str, message: str) -> tuple[str, list[SourceCh
     chunks = await collect_planning_evidence(project_id, message)
     sources = [SourceChunk(**chunk) for chunk in chunks]
     proposed_operations = _proposed_operations_from_request(message)
-    if proposed_operations is None:
-        proposed_operations = _proposed_operations_from_known_fix(message, chunks)
     direct_plan = _direct_change_plan(message, chunks)
     if direct_plan:
         return direct_plan, sources, proposed_operations
@@ -138,47 +136,6 @@ def _proposed_operations_from_request(message: str) -> list[dict] | None:
         return None
 
     return [{"action": action, "path": path, "content": content}]
-
-
-def _proposed_operations_from_known_fix(message: str, chunks: list[dict]) -> list[dict] | None:
-    lowered = message.lower()
-    if "index.html" not in lowered or "button" not in lowered or "color" not in lowered:
-        return None
-    if not re.search(r"\b(fix|repair|correct|update|edit)\b", lowered):
-        return None
-
-    for chunk in chunks:
-        path = chunk["file_path"]
-        content = chunk["content"]
-        if not path.lower().endswith("index.html"):
-            continue
-
-        updated = _fix_color_button_script(content)
-        if updated != content:
-            return [{"action": "edit", "path": path, "content": updated}]
-
-    return None
-
-
-def _fix_color_button_script(content: str) -> str:
-    updated = re.sub(
-        r"button\.addEventListener\((['\"]click['\"]),\s*\(\)\s*\{",
-        r"button.addEventListener(\1, () => {",
-        content,
-    )
-    updated = re.sub(
-        r"colors\[\s*(?:Math\.)?floor\(\s*\.random\(\)\s*\*\s*colors\.length\s*\)\s*\]",
-        "colors[Math.floor(Math.random() * colors.length)]",
-        updated,
-        flags=re.DOTALL,
-    )
-    updated = re.sub(
-        r"colors\[\s*\.floor\(\s*Math\.random\(\)\s*\*\s*colors\.length\s*\)\s*\]",
-        "colors[Math.floor(Math.random() * colors.length)]",
-        updated,
-        flags=re.DOTALL,
-    )
-    return updated
 
 
 def _requested_file_action(message: str) -> str | None:
@@ -251,7 +208,7 @@ def _direct_change_plan(message: str, chunks: list[dict]) -> str | None:
                         "test": "- Confirm the browser console no longer shows a syntax error near the click handler.",
                     }
                 )
-            if re.search(r"(?:Math\.)?floor\s*\(\s*\.random\s*\(", stripped) or re.search(r"\.floor\s*\(\s*Math\.random\s*\(", stripped):
+            if re.search(r"Math\.floor\s*\(\s*\.random\s*\(", stripped):
                 line_number = chunk["start_line"] + offset
                 issues.append(
                     {
