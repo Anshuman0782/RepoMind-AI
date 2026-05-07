@@ -16,6 +16,9 @@ from app.models.schemas import (
     SourceChunk,
     UpdateChatSessionRequest,
 )
+from app.services.chat_answer_service import direct_chat_answer
+from app.services.context_utils import full_file_chunks_for_message, merge_context_chunks
+from app.services.documentation_service import generate_documentation, is_documentation_request
 from app.services.investigation_service import investigate_codebase
 from app.services.llm_provider import LLMProviderError, generate_answer
 from app.services.planner_service import plan_change
@@ -139,10 +142,13 @@ async def chat(payload: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=404, detail="Chat not found")
 
     chunks = await search_chunks(payload.project_id, payload.message)
-    try:
-        answer = await generate_answer(payload.message, chunks)
-    except LLMProviderError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    chunks = await _augment_chat_context(payload.project_id, payload.message, chunks)
+    answer = direct_chat_answer(payload.message, chunks)
+    if answer is None:
+        try:
+            answer = await generate_answer(payload.message, chunks)
+        except LLMProviderError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     sources = [SourceChunk(**chunk) for chunk in chunks]
     now = utc_now()
@@ -166,6 +172,11 @@ async def chat(payload: ChatRequest) -> ChatResponse:
     await db.chats.update_one({"_id": payload.chat_id}, {"$set": update_fields})
 
     return ChatResponse(answer=answer, sources=sources)
+
+
+async def _augment_chat_context(project_id: str, message: str, chunks: list[dict]) -> list[dict]:
+    full_file_chunks = await full_file_chunks_for_message(project_id, message)
+    return merge_context_chunks(full_file_chunks, chunks)
 
 
 @router.post("/investigate", response_model=ChatResponse)
@@ -214,9 +225,14 @@ async def create_change_plan(payload: ChangePlanRequest) -> ChatResponse:
     if not chat_session:
         raise HTTPException(status_code=404, detail="Chat not found")
 
-    answer, sources = await plan_change(payload.project_id, payload.message)
+    if is_documentation_request(payload.message):
+        answer, sources = await generate_documentation(payload.project_id, payload.message)
+        proposed_operations = None
+        question = f"Documentation agent: {payload.message}"
+    else:
+        answer, sources, proposed_operations = await plan_change(payload.project_id, payload.message)
+        question = f"Change planner: {payload.message}"
     now = utc_now()
-    question = f"Change planner: {payload.message}"
     await db.chat_messages.insert_one(
         {
             "_id": str(uuid4()),
@@ -236,7 +252,7 @@ async def create_change_plan(payload: ChangePlanRequest) -> ChatResponse:
         update_fields["title"] = title_from_question(payload.message)
     await db.chats.update_one({"_id": payload.chat_id}, {"$set": update_fields})
 
-    return ChatResponse(answer=answer, sources=sources)
+    return ChatResponse(answer=answer, sources=sources, proposed_operations=proposed_operations)
 
 
 @router.post("/review", response_model=ChatResponse)

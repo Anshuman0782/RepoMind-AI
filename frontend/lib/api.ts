@@ -23,6 +23,7 @@ export type ChatResponse = {
     end_line: number;
     content: string;
   }[];
+  proposed_operations?: FileEditOperation[] | null;
 };
 
 export type ChatMessageResponse = ChatResponse & {
@@ -65,6 +66,21 @@ export type EditChangeSet = {
   status: "pending" | "applied" | "rejected" | "rolled_back";
   files: string[];
   diff: string;
+};
+
+export type CommitAssistantPreview = {
+  has_changes: boolean;
+  changed_files: string[];
+  commit_message: string;
+  pr_title: string;
+  pr_description: string;
+  diff: string;
+};
+
+export type CreatedCommit = {
+  commit_hash: string;
+  commit_message: string;
+  changed_files: string[];
 };
 
 export async function createProject(name: string, repoUrl: string): Promise<Project> {
@@ -135,6 +151,41 @@ export async function getProjectGitDiff(projectId: string): Promise<string> {
   }
   const payload = (await response.json()) as { diff: string };
   return payload.diff;
+}
+
+export async function previewCommitAssistant(
+  projectId: string,
+  context: string,
+): Promise<CommitAssistantPreview> {
+  const safeContext = context.trim().slice(0, 2000);
+  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/commit-assistant/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ context: safeContext }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return response.json();
+}
+
+export async function createCommit(
+  projectId: string,
+  commitMessage: string,
+): Promise<CreatedCommit> {
+  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/commit-assistant/commit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ commit_message: commitMessage }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return response.json();
 }
 
 export async function createEditChangeSet(

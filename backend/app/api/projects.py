@@ -1,12 +1,16 @@
 import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 
 from app.core.config import settings
 from app.core.database import db
 from app.models.schemas import (
     CodeSearchResultResponse,
+    CommitAssistantRequest,
+    CommitAssistantResponse,
+    CreateCommitRequest,
+    CreateCommitResponse,
     CreateEditChangeSetRequest,
     CreateProjectRequest,
     EditChangeSetResponse,
@@ -16,6 +20,7 @@ from app.models.schemas import (
     ProjectResponse,
 )
 from app.services.codebase_tools import get_git_diff, list_files, read_file, search_code
+from app.services.commit_assistant_service import create_commit, prepare_commit
 from app.services.editing_tools import (
     apply_edit_change_set,
     create_edit_change_set,
@@ -93,6 +98,28 @@ async def search_project_code(
 async def read_project_git_diff(project_id: str) -> GitDiffResponse:
     try:
         return await get_git_diff(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{project_id}/commit-assistant/preview", response_model=CommitAssistantResponse)
+async def preview_project_commit(
+    project_id: str,
+    payload: CommitAssistantRequest = Body(default_factory=CommitAssistantRequest),
+) -> CommitAssistantResponse:
+    try:
+        return await prepare_commit(project_id, payload.context)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{project_id}/commit-assistant/commit", response_model=CreateCommitResponse)
+async def create_project_commit(
+    project_id: str,
+    payload: CreateCommitRequest,
+) -> CreateCommitResponse:
+    try:
+        return await create_commit(project_id, payload.commit_message)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

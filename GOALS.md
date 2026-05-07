@@ -77,7 +77,7 @@ Planned work:
 - [x] User must approve the plan before moving to edits.
 - [x] No file modifications in this goal.
 
-## Goal 7: Safe Code Editing Agent
+## Completed Goal 7: Safe Automated Code Editing Agent
 
 Apply approved changes with strict human control.
 
@@ -91,14 +91,17 @@ Safety rules:
 
 Planned work:
 
-- Add approved write tools:
+- [x] Add approved write tools:
   - `create_file`
   - `edit_file`
   - `delete_file`
-- Add diff preview UI.
-- Add apply/reject flow.
-- Add rollback for the current proposed change set.
-- Start with local file edits only.
+- [x] Add diff preview UI.
+- [x] Add apply/reject flow.
+- [x] Add rollback for the current proposed change set.
+- [x] Start with local file edits only.
+- [x] Let Planner prepare an Editor Agent handoff for concrete file requests.
+- [x] After edit approval, apply the change and ask for separate approval before running Review Agent.
+- [x] Keep Editor and Review tabs as visibility/fallback views instead of the main workflow.
 
 ## Completed Goal 8: Test Writer And Code Review Agent
 
@@ -112,29 +115,32 @@ Planned work:
 - [x] Summarize residual risks.
 - [x] Keep test execution approval-based by suggesting commands instead of running them automatically.
 
-## Goal 9: Documentation Agent
+## Completed Goal 9: Documentation Agent
 
 Make repositories easier to understand and maintain.
 
 Planned work:
 
-- Generate architecture summaries.
-- Generate README improvements.
-- Generate API docs and setup notes.
-- Generate onboarding guides.
-- Add "explain this file/module" from file explorer.
+- [x] Generate architecture summaries.
+- [x] Generate README improvements.
+- [x] Generate API docs and setup notes.
+- [x] Generate onboarding guides.
+- [x] Route documentation requests through Planner as an automated Documentation Agent handoff.
+- [x] Support "explain this file/module" from Planner/chat requests.
 
-## Goal 10: Commit And PR Assistant
+Note: a dedicated file explorer "Explain" button is optional polish because the chat and Planner can already accept a file/module explanation request with the path.
+
+## Completed Goal 10: Commit And PR Assistant
 
 Help finish a change professionally.
 
 Planned work:
 
-- Read the current git diff.
-- Generate a meaningful commit message.
-- Ask permission before committing.
-- Create local commits only at first.
-- Generate PR title and description.
+- [x] Read the current git diff.
+- [x] Generate a meaningful commit message.
+- [x] Ask permission before committing.
+- [x] Create local commits only at first.
+- [x] Generate PR title and description.
 - Add branch and pull request creation later.
 
 ## Future Ideas

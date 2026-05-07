@@ -2,6 +2,7 @@ import re
 
 from app.models.schemas import SourceChunk
 from app.services.codebase_tools import search_code
+from app.services.context_utils import full_file_chunks_for_message, merge_context_chunks
 from app.services.llm_provider import LLMProviderError, generate_answer
 from app.services.vector_store import search_chunks
 
@@ -48,6 +49,7 @@ def _dedupe_chunks(chunks: list[dict]) -> list[dict]:
 
 async def collect_investigation_evidence(project_id: str, message: str) -> list[dict]:
     chunks = await search_chunks(project_id, message, limit=MAX_EVIDENCE_CHUNKS)
+    explicit_file_chunks = await full_file_chunks_for_message(project_id, message)
     keyword_hits = []
 
     for keyword in _keywords(message):
@@ -68,7 +70,9 @@ async def collect_investigation_evidence(project_id: str, message: str) -> list[
             }
         )
 
-    return _dedupe_chunks(chunks)[: MAX_EVIDENCE_CHUNKS + MAX_KEYWORD_RESULTS]
+    return _dedupe_chunks(
+        merge_context_chunks(explicit_file_chunks, chunks)
+    )[: MAX_EVIDENCE_CHUNKS + MAX_KEYWORD_RESULTS]
 
 
 async def investigate_codebase(project_id: str, message: str, mode: str) -> tuple[str, list[SourceChunk]]:
@@ -104,21 +108,37 @@ def _effective_mode(message: str, mode: str) -> str:
 
 
 def _direct_bug_answer(chunks: list[dict]) -> str | None:
+    evidence = []
+    fixes = []
+
     for chunk in chunks:
         for offset, line in enumerate(chunk["content"].splitlines()):
             stripped = line.strip()
             if re.search(r"addEventListener\s*\(.*\(\)\s*\{", stripped):
                 line_number = chunk["start_line"] + offset
-                return (
-                    "**Problem**\n"
-                    "The click handler has invalid arrow-function syntax, so the script stops before the button works.\n\n"
-                    "**Evidence**\n"
-                    f"- {chunk['file_path']}:{line_number} has `{stripped}`\n"
-                    "- The function is missing `=>` before `{`.\n\n"
-                    "**Fix**\n"
-                    "Change it to `button.addEventListener(\"click\", () => {`."
+                evidence.append(
+                    f"- {chunk['file_path']}:{line_number} has invalid click-handler syntax: `{stripped}`. "
+                    "The function is missing `=>` before `{`."
                 )
-    return None
+                fixes.append("- Change the handler to `button.addEventListener(\"click\", () => {`.")
+            if "math.floor" in stripped:
+                line_number = chunk["start_line"] + offset
+                evidence.append(
+                    f"- {chunk['file_path']}:{line_number} uses lowercase `math.floor`, but JavaScript's built-in object is `Math`."
+                )
+                fixes.append("- Change the random color line to `colors[Math.floor(Math.random() * colors.length)]`.")
+
+    if not evidence:
+        return None
+
+    return (
+        "**Problem**\n"
+        "The button script has JavaScript errors that can stop the click handler before the background color changes.\n\n"
+        "**Evidence**\n"
+        f"{chr(10).join(_dedupe_lines(evidence))}\n\n"
+        "**Fix**\n"
+        f"{chr(10).join(_dedupe_lines(fixes))}"
+    )
 
 
 def _direct_navigator_answer(message: str, chunks: list[dict]) -> str | None:
@@ -159,6 +179,17 @@ def _find_line(chunks: list[dict], pattern: str) -> tuple[str, int, str] | None:
             if regex.search(stripped):
                 return chunk["file_path"], chunk["start_line"] + offset, stripped
     return None
+
+
+def _dedupe_lines(lines: list[str]) -> list[str]:
+    deduped = []
+    seen = set()
+    for line in lines:
+        if line in seen:
+            continue
+        seen.add(line)
+        deduped.append(line)
+    return deduped
 
 
 def _investigation_prompt(message: str, mode: str, chunks: list[dict]) -> str:

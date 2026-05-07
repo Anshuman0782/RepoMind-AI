@@ -97,6 +97,29 @@ class CodeReviewRequest(BaseModel):
     change_set_id: str | None = None
 
 
+class CommitAssistantRequest(BaseModel):
+    context: str | None = Field(default=None, max_length=2000)
+
+
+class CommitAssistantResponse(BaseModel):
+    has_changes: bool
+    changed_files: list[str]
+    commit_message: str
+    pr_title: str
+    pr_description: str
+    diff: str
+
+
+class CreateCommitRequest(BaseModel):
+    commit_message: str = Field(min_length=3, max_length=2000)
+
+
+class CreateCommitResponse(BaseModel):
+    commit_hash: str
+    commit_message: str
+    changed_files: list[str]
+
+
 class SourceChunk(BaseModel):
     file_path: str
     start_line: int
@@ -107,6 +130,7 @@ class SourceChunk(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     sources: list[SourceChunk]
+    proposed_operations: list[FileEditOperation] | None = None
 
 
 class ChatMessageResponse(BaseModel):

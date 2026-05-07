@@ -4,14 +4,15 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   CodeSearchResult,
   ChatSession,
-  ChatMessageResponse,
-  ChatResponse,
+  CommitAssistantPreview,
+  CreatedCommit,
   EditChangeSet,
   FileEditOperation,
   FileContent,
   FileEntry,
   Project,
   applyEditChangeSet,
+  createCommit,
   createChangePlan,
   createChatSession,
   createEditChangeSet,
@@ -26,6 +27,7 @@ import {
   listProjects,
   readProjectFile,
   rejectEditChangeSet,
+  previewCommitAssistant,
   renameChatSession,
   rollbackEditChangeSet,
   searchProjectCode,
@@ -33,151 +35,17 @@ import {
   reviewCodeChanges,
 } from "@/lib/api";
 
-import { Copy, Send } from "lucide-react";
-
-type ChatMessage = {
-  id: string;
-  question: string;
-  answer: string;
-  sources: ChatResponse["sources"];
-  createdAt: string;
-};
-
-type AnswerPart =
-  | {
-      type: "text";
-      content: string;
-    }
-  | {
-      type: "code";
-      language: string;
-      content: string;
-    };
-
-function parseAnswer(answer: string): AnswerPart[] {
-  const parts: AnswerPart[] = [];
-  const codeBlockPattern = /```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = codeBlockPattern.exec(answer)) !== null) {
-    const textBefore = answer.slice(lastIndex, match.index);
-    if (textBefore.trim()) {
-      parts.push({ type: "text", content: textBefore.trim() });
-    }
-    parts.push({
-      type: "code",
-      language: match[1]?.trim() || "code",
-      content: match[2].replace(/\n$/, ""),
-    });
-    lastIndex = match.index + match[0].length;
-  }
-
-  const remainingText = answer.slice(lastIndex);
-  if (remainingText.trim()) {
-    parts.push({ type: "text", content: remainingText.trim() });
-  }
-
-  return parts.length > 0 ? parts : [{ type: "text", content: answer }];
-}
-
-function renderInlineText(text: string) {
-  const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
-  return tokens.map((token, index) => {
-    if (token.startsWith("`") && token.endsWith("`")) {
-      return (
-        <code key={`${token}:${index}`} className="rounded bg-panel px-1 py-0.5 text-[0.92em] text-ink">
-          {token.slice(1, -1)}
-        </code>
-      );
-    }
-    if (token.startsWith("**") && token.endsWith("**")) {
-      return (
-        <strong key={`${token}:${index}`} className="font-semibold text-ink">
-          {token.slice(2, -2)}
-        </strong>
-      );
-    }
-    return token;
-  });
-}
-
-function AnswerContent({ answer }: { answer: string }) {
-  const parts = parseAnswer(answer);
-
-  async function copyCode(content: string) {
-    await navigator.clipboard.writeText(content);
-  }
-
-  return (
-    <div className="space-y-3 leading-6 sm:leading-7">
-      {parts.map((part, index) => {
-        if (part.type === "code") {
-          return (
-            <div
-              key={`code:${index}`}
-              className="overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 text-zinc-100"
-            >
-              <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2 text-xs font-semibold text-zinc-300">
-                <span>{part.language}</span>
-                <button
-                  type="button"
-                  className="rounded p-1 text-zinc-300 transition hover:bg-zinc-800 hover:text-white"
-                  onClick={() => copyCode(part.content)}
-                  aria-label="Copy code"
-                  title="Copy code"
-                >
-                  <Copy size={16} />
-                </button>
-              </div>
-              <pre className="max-h-96 overflow-auto p-3 text-xs leading-5">
-                <code>{part.content}</code>
-              </pre>
-            </div>
-          );
-        }
-
-        return part.content.split(/\n{2,}/).map((paragraph, paragraphIndex) => (
-          <p key={`text:${index}:${paragraphIndex}`} className="whitespace-pre-wrap">
-            {renderInlineText(paragraph)}
-          </p>
-        ));
-      })}
-    </div>
-  );
-}
-
-function formatChatTime(value: string): string {
-  return new Date(value).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function toChatMessage(message: ChatMessageResponse): ChatMessage {
-  return {
-    id: message.id,
-    question: message.question,
-    answer: message.answer,
-    sources: message.sources,
-    createdAt: formatChatTime(message.created_at),
-  };
-}
-
-function titleFromQuestion(question: string): string {
-  const title = question.trim().replace(/\s+/g, " ");
-  return title.length > 60 ? `${title.slice(0, 57).trim()}...` : title || "New chat";
-}
-
-function formatBytes(value: number): string {
-  if (value < 1024) {
-    return `${value} B`;
-  }
-  if (value < 1024 * 1024) {
-    return `${(value / 1024).toFixed(1)} KB`;
-  }
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-}
+import { ChatView } from "./components/ChatView";
+import { CommitView } from "./components/CommitView";
+import { EditorView } from "./components/EditorView";
+import { FilesView } from "./components/FilesView";
+import { NavigatorView } from "./components/NavigatorView";
+import { PlannerView } from "./components/PlannerView";
+import { ProjectSidebar } from "./components/ProjectSidebar";
+import { ReviewView } from "./components/ReviewView";
+import { WorkspaceTabs } from "./components/WorkspaceTabs";
+import { ChatMessage, WorkspaceMode } from "./types";
+import { isDocumentationRequest, titleFromQuestion, toChatMessage } from "./utils";
 
 export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -189,15 +57,22 @@ export default function Home() {
   const [chatsByProject, setChatsByProject] = useState<Record<string, ChatSession[]>>({});
   const [messagesByChat, setMessagesByChat] = useState<Record<string, ChatMessage[]>>({});
   const [projectSearch, setProjectSearch] = useState("");
-  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "files" | "navigator" | "planner" | "editor" | "review">("chat");
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("chat");
   const [investigationMode, setInvestigationMode] = useState<"navigator" | "bug">("navigator");
   const [investigationPrompt, setInvestigationPrompt] = useState("");
   const [plannerPrompt, setPlannerPrompt] = useState("");
   const [reviewPrompt, setReviewPrompt] = useState("");
+  const [commitContext, setCommitContext] = useState("");
+  const [commitPreview, setCommitPreview] = useState<CommitAssistantPreview | null>(null);
+  const [createdCommit, setCreatedCommit] = useState<CreatedCommit | null>(null);
   const [editAction, setEditAction] = useState<FileEditOperation["action"]>("edit");
   const [editFilePath, setEditFilePath] = useState("");
   const [editContent, setEditContent] = useState("");
   const [activeEditChangeSet, setActiveEditChangeSet] = useState<EditChangeSet | null>(null);
+  const [plannerChangeSetId, setPlannerChangeSetId] = useState("");
+  const [plannerAutomationPrompt, setPlannerAutomationPrompt] = useState("");
+  const [plannerAutomationChatId, setPlannerAutomationChatId] = useState("");
+  const [plannerAutomationStatus, setPlannerAutomationStatus] = useState("");
   const [reviewSuggestionFiles, setReviewSuggestionFiles] = useState<string[]>([]);
   const [reviewSuggestionChangeSetId, setReviewSuggestionChangeSetId] = useState("");
   const [filesByProject, setFilesByProject] = useState<Record<string, FileEntry[]>>({});
@@ -629,6 +504,12 @@ export default function Home() {
     setPendingAction("edit-preview");
     setError("");
     setActiveEditChangeSet(null);
+    setPlannerChangeSetId("");
+    setPlannerAutomationPrompt("");
+    setPlannerAutomationChatId("");
+    setPlannerAutomationStatus("");
+    setCommitPreview(null);
+    setCreatedCommit(null);
     setReviewSuggestionFiles([]);
     setReviewSuggestionChangeSetId("");
     try {
@@ -675,6 +556,12 @@ export default function Home() {
       setActiveEditChangeSet(updated);
       setReviewSuggestionFiles([]);
       setReviewSuggestionChangeSetId("");
+      setPlannerChangeSetId("");
+      setPlannerAutomationPrompt("");
+      setPlannerAutomationChatId("");
+      setPlannerAutomationStatus("");
+      setCommitPreview(null);
+      setCreatedCommit(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to reject edit");
     } finally {
@@ -694,6 +581,12 @@ export default function Home() {
       setActiveEditChangeSet(updated);
       setReviewSuggestionFiles([]);
       setReviewSuggestionChangeSetId("");
+      setPlannerChangeSetId("");
+      setPlannerAutomationPrompt("");
+      setPlannerAutomationChatId("");
+      setPlannerAutomationStatus("");
+      setCommitPreview(null);
+      setCreatedCommit(null);
       updated.files.forEach(clearCachedFile);
       const diff = await getProjectGitDiff(selectedProjectId);
       setGitDiff(diff || "No uncommitted changes.");
@@ -808,9 +701,10 @@ export default function Home() {
 
       const hadMessages = (messagesByChat[activeChatId] ?? []).length > 0;
       const response = await createChangePlan(selectedProjectId, activeChatId, submittedPrompt);
+      const plannerLabel = isDocumentationRequest(submittedPrompt) ? "Documentation agent" : "Change planner";
       const chatMessage: ChatMessage = {
         id: crypto.randomUUID(),
-        question: `Change planner: ${submittedPrompt}`,
+        question: `${plannerLabel}: ${submittedPrompt}`,
         answer: response.answer,
         sources: response.sources,
         createdAt: new Date().toLocaleTimeString([], {
@@ -822,6 +716,33 @@ export default function Home() {
         ...current,
         [activeChatId]: [...(current[activeChatId] ?? []), chatMessage],
       }));
+      if (response.proposed_operations?.length) {
+        try {
+          const changeSet = await createEditChangeSet(selectedProjectId, response.proposed_operations);
+          setActiveEditChangeSet(changeSet);
+          setPlannerChangeSetId(changeSet.id);
+          setPlannerAutomationPrompt(submittedPrompt);
+          setPlannerAutomationChatId(activeChatId);
+          setPlannerAutomationStatus("Editor Agent prepared a diff preview. Approve the edit, then Commit Assistant will draft commit and PR copy before Review Agent.");
+          setCommitContext(submittedPrompt);
+          setCommitPreview(null);
+          setCreatedCommit(null);
+          const firstOperation = response.proposed_operations[0];
+          setEditAction(firstOperation.action);
+          setEditFilePath(firstOperation.path);
+          setEditContent(firstOperation.content ?? "");
+        } catch (previewError) {
+          setPlannerAutomationStatus("");
+          setError(previewError instanceof Error ? previewError.message : "Planner could not prepare an edit preview");
+        }
+      } else {
+        setPlannerChangeSetId("");
+        setPlannerAutomationPrompt("");
+        setPlannerAutomationChatId("");
+        setPlannerAutomationStatus("");
+        setCommitPreview(null);
+        setCreatedCommit(null);
+      }
       if (!hadMessages) {
         setChatsByProject((current) => ({
           ...current,
@@ -836,7 +757,7 @@ export default function Home() {
           ),
         }));
       }
-      setWorkspaceMode("chat");
+      setWorkspaceMode(response.proposed_operations?.length ? "planner" : "chat");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create change plan");
       setPlannerPrompt(submittedPrompt);
@@ -846,7 +767,7 @@ export default function Home() {
     }
   }
 
-  async function runCodeReview(submittedPrompt: string, changeSetId?: string) {
+  async function runCodeReview(submittedPrompt: string, changeSetId?: string, chatIdOverride?: string) {
     if (!selectedProjectId) {
       setError("Create or select a project first.");
       return;
@@ -859,7 +780,7 @@ export default function Home() {
     setError("");
     setReviewPrompt("");
     try {
-      let activeChatId = selectedChatId;
+      let activeChatId = chatIdOverride || selectedChatId;
       if (!activeChatId) {
         const chat = await createChatSession(selectedProjectId);
         activeChatId = chat.id;
@@ -922,12 +843,140 @@ export default function Home() {
     await runCodeReview(reviewPrompt.trim());
   }
 
+  async function handlePreviewCommit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedProjectId) {
+      setError("Create or select a project first.");
+      return;
+    }
+
+    setPendingAction("commit-preview");
+    setError("");
+    setCreatedCommit(null);
+    try {
+      const preview = await previewCommitAssistant(selectedProjectId, commitContext.trim());
+      setCommitPreview(preview);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to draft commit details");
+    } finally {
+      setPendingAction("");
+    }
+  }
+
+  async function handleCreateCommit() {
+    if (!selectedProjectId || !commitPreview) {
+      return;
+    }
+
+    const messageToCommit = commitPreview.commit_message.trim();
+    if (!messageToCommit) {
+      setError("Commit message cannot be empty.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Create a local commit with all current repository changes?",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setPendingAction("create-commit");
+    setError("");
+    try {
+      const commit = await createCommit(selectedProjectId, messageToCommit);
+      setCreatedCommit(commit);
+      setCommitPreview((current) => (current ? { ...current, diff: "" } : current));
+      if (activeEditChangeSet?.id === plannerChangeSetId) {
+        setPlannerAutomationStatus("Local commit created. Review Agent is still available for a final check.");
+      }
+      setGitDiff("No uncommitted changes.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create commit");
+    } finally {
+      setPendingAction("");
+    }
+  }
+
+  function updateCommitPreviewField<K extends keyof CommitAssistantPreview>(
+    key: K,
+    value: CommitAssistantPreview[K],
+  ) {
+    setCommitPreview((current) => (current ? { ...current, [key]: value } : current));
+  }
+
   async function handleSuggestedCodeReview() {
     const fileList = reviewSuggestionFiles.join(", ");
     const prompt = fileList
       ? `Review the just-applied edit change set. Focus on these files: ${fileList}`
       : "Review the just-applied edit change set.";
     await runCodeReview(prompt, reviewSuggestionChangeSetId);
+  }
+
+  async function handleApprovePlannerAutomation() {
+    if (!selectedProjectId || !activeEditChangeSet || activeEditChangeSet.id !== plannerChangeSetId) {
+      return;
+    }
+
+    setPendingAction("planner-automation");
+    setError("");
+    setPlannerAutomationStatus("Editor Agent is applying the approved change...");
+    setCommitPreview(null);
+    setCreatedCommit(null);
+    try {
+      const updated = await applyEditChangeSet(selectedProjectId, activeEditChangeSet.id);
+      setActiveEditChangeSet(updated);
+      updated.files.forEach(clearCachedFile);
+      const diff = await getProjectGitDiff(selectedProjectId);
+      setGitDiff(diff || "No uncommitted changes.");
+      setPlannerAutomationStatus("Edit applied. Commit Assistant is drafting commit and PR copy...");
+      const commitDraft = await previewCommitAssistant(
+        selectedProjectId,
+        plannerAutomationPrompt || "Planner-approved edit",
+      );
+      setCommitPreview(commitDraft);
+      setPlannerAutomationStatus(
+        commitDraft.has_changes
+          ? "Commit Assistant drafted commit and PR copy. Commit and Review Agent both require your approval."
+          : "Edit applied, but Commit Assistant did not find an uncommitted diff. Review Agent is ready after approval.",
+      );
+      setReviewSuggestionFiles(updated.files);
+      setReviewSuggestionChangeSetId(updated.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Planner automation failed");
+    } finally {
+      setPendingAction("");
+      setPendingQuestion("");
+    }
+  }
+
+  async function handleApprovePlannerReview() {
+    if (!activeEditChangeSet || activeEditChangeSet.id !== plannerChangeSetId) {
+      return;
+    }
+
+    setPendingAction("planner-review");
+    setError("");
+    try {
+      const fileList = activeEditChangeSet.files.join(", ");
+      setPlannerAutomationStatus("Review Agent is checking the applied change...");
+      await runCodeReview(
+        fileList
+          ? `Review the Planner-approved change. Focus on these files: ${fileList}`
+          : "Review the Planner-approved change.",
+        activeEditChangeSet.id,
+        plannerAutomationChatId,
+      );
+      setPlannerAutomationStatus("Planner finished the edit and review flow.");
+      setPlannerChangeSetId("");
+      setPlannerAutomationPrompt("");
+      setPlannerAutomationChatId("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Review Agent failed");
+    } finally {
+      setPendingAction("");
+      setPendingQuestion("");
+    }
   }
 
   async function handleChat(event: FormEvent<HTMLFormElement>) {
@@ -1000,193 +1049,46 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-white text-ink lg:h-screen lg:overflow-hidden">
       <div className="mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-0 lg:h-screen lg:grid-cols-[360px_1fr]">
-        <aside className="flex min-h-0 flex-col border-b border-line bg-panel p-3 sm:p-6 lg:border-b-0 lg:border-r">
-          <h1 className="text-xl font-semibold leading-tight sm:text-2xl">RepoMind AI</h1>
-          <p className="mt-1 text-xs leading-5 text-zinc-600 sm:mt-2 sm:text-sm sm:leading-6">
-            Import a public GitHub repo, index it, and ask grounded questions about the code.
-          </p>
-
-          <form className="mt-4 space-y-2 sm:mt-8 sm:space-y-3" onSubmit={handleCreateProject}>
-            <input
-              className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm outline-none focus:border-accent"
-              placeholder="Project name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              required
-            />
-            <input
-              className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm outline-none focus:border-accent"
-              placeholder="https://github.com/user/repo"
-              value={repoUrl}
-              onChange={(event) => setRepoUrl(event.target.value)}
-              required
-            />
-            <button
-              className="w-full rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
-              disabled={busy}
-            >
-              {pendingAction === "import" ? "Importing..." : "Import Repo"}
-            </button>
-          </form>
-
-          <div className="mt-5 sm:mt-8">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Projects</h2>
-            <input
-              className="mt-3 w-full rounded-md border border-line bg-white px-3 py-2 text-sm outline-none focus:border-accent"
-              placeholder="Search projects"
-              value={projectSearch}
-              onChange={(event) => setProjectSearch(event.target.value)}
-            />
-            <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1 sm:max-h-80 lg:max-h-[calc(100vh-390px)]">
-              {loadingProjects ? (
-                <div className="space-y-2">
-                  <div className="h-16 animate-pulse rounded-md bg-white" />
-                  <div className="h-16 animate-pulse rounded-md bg-white" />
-                </div>
-              ) : null}
-              {filteredProjects.map((project) => (
-                <div key={project.id} className="space-y-1">
-                  <div
-                    className={`group/project relative rounded-md border p-2 text-sm transition ${
-                      selectedProjectId === project.id
-                        ? "border-accent bg-white shadow-sm"
-                        : "border-line bg-transparent hover:border-zinc-400 hover:bg-white"
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      className="min-w-0 w-full pr-14 text-left"
-                      onClick={() => {
-                        setSelectedProjectId(project.id);
-                        setSelectedChatId(chatsByProject[project.id]?.[0]?.id ?? "");
-                        setSelectedFilePath("");
-                        setSearchResults([]);
-                        setGitDiff("");
-                        setActiveEditChangeSet(null);
-                        setError("");
-                      }}
-                    >
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="truncate font-medium">{project.name}</span>
-                        <span className="rounded bg-panel px-1.5 py-0.5 text-[10px] uppercase text-zinc-500">
-                          {project.status}
-                        </span>
-                      </span>
-                      <span className="block truncate text-xs text-zinc-500">{project.repo_url}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="absolute right-2 top-2 rounded-md px-2 py-1 text-xs text-red-500 opacity-0 transition hover:bg-red-50 group-hover/project:opacity-100 group-focus-within/project:opacity-100 disabled:opacity-40"
-                      onClick={() => handleDeleteProject(project.id)}
-                      disabled={busy}
-                      title="Delete project"
-                    >
-                      {pendingAction === "delete-project" ? "..." : "Delete"}
-                    </button>
-                  </div>
-                  {selectedProjectId === project.id ? (
-                    <div className="space-y-1 pl-0 sm:pl-3">
-                      <button
-                        type="button"
-                        className="w-full rounded-md border border-dashed border-line px-3 py-2 text-left text-xs font-medium text-zinc-600 transition hover:border-zinc-400 hover:bg-white disabled:opacity-60"
-                        onClick={handleCreateChat}
-                        disabled={busy}
-                      >
-                        {pendingAction === "new-chat" ? "Creating chat..." : "+ New chat"}
-                      </button>
-                      {isLoadingChats ? (
-                        <div className="rounded-md px-3 py-2 text-xs text-zinc-500">
-                          Loading chats...
-                        </div>
-                      ) : null}
-                      {!isLoadingChats && (chatsByProject[project.id] ?? []).length === 0 ? (
-                        <div className="rounded-md px-3 py-2 text-xs text-zinc-500">
-                          No chats yet.
-                        </div>
-                      ) : null}
-                      {(chatsByProject[project.id] ?? []).map((chat) => (
-                        <div key={chat.id} className="group flex flex-wrap items-center gap-1 sm:flex-nowrap">
-                          {editingChatId === chat.id ? (
-                            <form
-                              className="flex min-w-0 flex-1 items-center gap-1"
-                              onSubmit={(event) => handleRenameChat(event, chat.id)}
-                            >
-                              <input
-                                className="min-w-0 flex-1 rounded-md border border-line bg-white px-2 py-1.5 text-xs outline-none focus:border-accent"
-                                value={editingTitle}
-                                onChange={(event) => setEditingTitle(event.target.value)}
-                                autoFocus
-                              />
-                              <button
-                                type="submit"
-                                className="rounded-md bg-ink px-2 py-1.5 text-xs font-medium text-white disabled:opacity-60"
-                                disabled={busy}
-                              >
-                                {pendingAction === "rename" ? "Saving" : "Save"}
-                              </button>
-                              <button
-                                type="button"
-                                className="rounded-md px-2 py-1.5 text-xs text-zinc-500 hover:bg-white hover:text-ink"
-                                onClick={() => {
-                                  setEditingChatId("");
-                                  setEditingTitle("");
-                                }}
-                              >
-                                Cancel
-                              </button>
-                            </form>
-                          ) : (
-                            <>
-                              <button
-                                type="button"
-                                className={`min-w-0 basis-full truncate rounded-md px-3 py-2 text-left text-xs transition sm:basis-auto ${
-                                  selectedChatId === chat.id
-                                    ? "bg-ink font-medium text-white"
-                                    : "text-zinc-600 hover:bg-white hover:text-ink"
-                                }`}
-                                onClick={() => {
-                                  setSelectedChatId(chat.id);
-                                  setError("");
-                                }}
-                              >
-                                {chat.title}
-                              </button>
-                              <button
-                                type="button"
-                                className="rounded-md px-2 py-1 text-xs text-zinc-500 opacity-100 hover:bg-white hover:text-ink lg:opacity-0 lg:group-hover:opacity-100"
-                                onClick={() => {
-                                  setEditingChatId(chat.id);
-                                  setEditingTitle(chat.title);
-                                }}
-                                title="Rename chat"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                className="rounded-md px-2 py-1 text-xs text-red-500 opacity-100 hover:bg-red-50 lg:opacity-0 lg:group-hover:opacity-100"
-                                onClick={() => handleDeleteChat(chat.id)}
-                                title="Delete chat"
-                                disabled={busy}
-                              >
-                                {pendingAction === "delete" ? "Deleting" : "Delete"}
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-              {!loadingProjects && filteredProjects.length === 0 ? (
-                <p className="rounded-md border border-dashed border-line px-3 py-4 text-center text-sm text-zinc-500">
-                  No projects found.
-                </p>
-              ) : null}
-            </div>
-          </div>
-        </aside>
+        <ProjectSidebar
+          filteredProjects={filteredProjects}
+          chatsByProject={chatsByProject}
+          selectedProjectId={selectedProjectId}
+          selectedChatId={selectedChatId}
+          name={name}
+          repoUrl={repoUrl}
+          projectSearch={projectSearch}
+          editingChatId={editingChatId}
+          editingTitle={editingTitle}
+          loadingProjects={loadingProjects}
+          isLoadingChats={isLoadingChats}
+          busy={busy}
+          pendingAction={pendingAction}
+          onCreateProject={handleCreateProject}
+          onCreateChat={handleCreateChat}
+          onDeleteProject={handleDeleteProject}
+          onDeleteChat={handleDeleteChat}
+          onRenameChat={handleRenameChat}
+          onSelectProject={(project) => {
+            setSelectedProjectId(project.id);
+            setSelectedChatId(chatsByProject[project.id]?.[0]?.id ?? "");
+            setSelectedFilePath("");
+            setSearchResults([]);
+            setGitDiff("");
+            setActiveEditChangeSet(null);
+            setCommitPreview(null);
+            setCreatedCommit(null);
+            setError("");
+          }}
+          onSelectChat={(chatId) => {
+            setSelectedChatId(chatId);
+            setError("");
+          }}
+          setName={setName}
+          setRepoUrl={setRepoUrl}
+          setProjectSearch={setProjectSearch}
+          setEditingChatId={setEditingChatId}
+          setEditingTitle={setEditingTitle}
+        />
 
         <section className="flex min-h-[520px] flex-col p-3 sm:p-6 lg:min-h-0">
           <div className="border-b border-line pb-4 sm:pb-5">
@@ -1212,667 +1114,140 @@ export default function Home() {
             </div>
           ) : null}
 
-          <div className="mt-4 grid w-full grid-cols-2 rounded-md border border-line bg-panel p-1 text-sm sm:grid-cols-3 xl:grid-cols-6">
-            <button
-              type="button"
-              className={`flex-1 rounded px-3 py-2 font-medium transition ${
-                workspaceMode === "chat" ? "bg-white text-ink shadow-sm" : "text-zinc-600 hover:text-ink"
-              }`}
-              onClick={() => setWorkspaceMode("chat")}
-            >
-              Chat
-            </button>
-            <button
-              type="button"
-              className={`flex-1 rounded px-3 py-2 font-medium transition ${
-                workspaceMode === "files" ? "bg-white text-ink shadow-sm" : "text-zinc-600 hover:text-ink"
-              }`}
-              onClick={() => setWorkspaceMode("files")}
-              disabled={!selectedProjectId}
-            >
-              Files
-            </button>
-            <button
-              type="button"
-              className={`flex-1 rounded px-3 py-2 font-medium transition ${
-                workspaceMode === "navigator" ? "bg-white text-ink shadow-sm" : "text-zinc-600 hover:text-ink"
-              }`}
-              onClick={() => setWorkspaceMode("navigator")}
-              disabled={!selectedProjectId}
-            >
-              Navigator
-            </button>
-            <button
-              type="button"
-              className={`flex-1 rounded px-3 py-2 font-medium transition ${
-                workspaceMode === "planner" ? "bg-white text-ink shadow-sm" : "text-zinc-600 hover:text-ink"
-              }`}
-              onClick={() => setWorkspaceMode("planner")}
-              disabled={!selectedProjectId}
-            >
-              Planner
-            </button>
-            <button
-              type="button"
-              className={`flex-1 rounded px-3 py-2 font-medium transition ${
-                workspaceMode === "editor" ? "bg-white text-ink shadow-sm" : "text-zinc-600 hover:text-ink"
-              }`}
-              onClick={() => setWorkspaceMode("editor")}
-              disabled={!selectedProjectId}
-            >
-              Editor
-            </button>
-            <button
-              type="button"
-              className={`flex-1 rounded px-3 py-2 font-medium transition ${
-                workspaceMode === "review" ? "bg-white text-ink shadow-sm" : "text-zinc-600 hover:text-ink"
-              }`}
-              onClick={() => setWorkspaceMode("review")}
-              disabled={!selectedProjectId}
-            >
-              Review
-            </button>
-          </div>
+          <WorkspaceTabs workspaceMode={workspaceMode} selectedProjectId={selectedProjectId} setWorkspaceMode={setWorkspaceMode} />
 
           {workspaceMode === "chat" ? (
-            <>
-          <div className="min-h-0 flex-1 overflow-y-auto py-4 pr-1 sm:py-6">
-            {isLoadingMessages ? (
-              <div className="space-y-6">
-                <div className="ml-auto h-20 max-w-[78%] animate-pulse rounded-md bg-zinc-200" />
-                <div className="h-32 max-w-[88%] animate-pulse rounded-md border border-line bg-white" />
-              </div>
-            ) : currentMessages.length > 0 || pendingQuestion ? (
-              <div className="space-y-6">
-                {currentMessages.map((item) => (
-                  <article key={item.id} className="space-y-3">
-                    <div className="ml-auto max-w-full rounded-md bg-ink px-3 py-2.5 text-sm text-white sm:max-w-[78%] sm:px-4 sm:py-3 sm:text-base">
-                      <div className="mb-1 text-xs font-medium text-zinc-300">You at {item.createdAt}</div>
-                      <p className="whitespace-pre-wrap leading-6">{item.question}</p>
-                    </div>
-
-                    <div className="max-w-full rounded-md border border-line bg-white px-3 py-2.5 text-sm sm:max-w-[88%] sm:px-4 sm:py-3 sm:text-base">
-                      <div className="mb-2 flex items-center justify-between gap-3 text-xs font-semibold uppercase text-zinc-500">
-                        <span>RepoMind</span>
-                        {item.sources.length > 0 ? (
-                          <span className="rounded bg-panel px-2 py-1 normal-case text-zinc-600">
-                            {item.sources.length} sources
-                          </span>
-                        ) : null}
-                      </div>
-                      <AnswerContent answer={item.answer} />
-
-                      {item.sources.length > 0 ? (
-                        <details className="mt-4 rounded-md border border-line bg-panel">
-                          <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-zinc-700">
-                            Source references
-                          </summary>
-                          <div className="grid gap-2 border-t border-line p-2 sm:p-3">
-                            {item.sources.map((source, index) => (
-                              <details
-                                key={`${item.id}:${source.file_path}:${source.start_line}:${source.end_line}:${index}`}
-                                className="rounded-md border border-line bg-white"
-                              >
-                                <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-zinc-700">
-                                  <span className="mr-2 rounded bg-panel px-1.5 py-0.5 text-[11px] text-zinc-500">
-                                    {index + 1}
-                                  </span>
-                                  <span className="break-all">
-                                    {source.file_path}:{source.start_line}-{source.end_line}
-                                  </span>
-                                </summary>
-                                <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-line bg-zinc-950 p-3 text-xs leading-5 text-zinc-100">
-                                  <code>{source.content}</code>
-                                </pre>
-                              </details>
-                            ))}
-                          </div>
-                        </details>
-                      ) : null}
-                    </div>
-                  </article>
-                ))}
-                {pendingQuestion ? (
-                  <article className="space-y-3">
-                    <div className="ml-auto max-w-full rounded-md bg-ink px-3 py-2.5 text-sm text-white sm:max-w-[78%] sm:px-4 sm:py-3 sm:text-base">
-                      <div className="mb-1 text-xs font-medium text-zinc-300">You just now</div>
-                      <p className="whitespace-pre-wrap leading-6">{pendingQuestion}</p>
-                    </div>
-                    <div className="max-w-full rounded-md border border-line bg-white px-3 py-2.5 text-sm sm:max-w-[88%] sm:px-4 sm:py-3">
-                      <div className="mb-2 text-xs font-semibold uppercase text-zinc-500">
-                        RepoMind
-                      </div>
-                      <div className="flex items-center gap-2 text-sm text-zinc-600">
-                        <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-                        Thinking through the repo context...
-                      </div>
-                    </div>
-                  </article>
-                ) : null}
-                <div ref={messagesEndRef} />
-              </div>
-            ) : (
-              <div className="flex h-full items-center justify-center text-center">
-                <div className="max-w-sm rounded-md border border-dashed border-line bg-panel px-5 py-6">
-                  <p className="text-sm font-medium text-ink">
-                    {selectedProject
-                      ? selectedChat
-                        ? "This chat is ready."
-                        : "No chat selected."
-                      : "No project selected."}
-                  </p>
-                  <p className="mt-2 text-sm leading-6 text-zinc-500">
-                    {selectedProject
-                      ? selectedChat
-                        ? "Ask a focused question and RepoMind will answer with source references."
-                        : "Create a chat or ask a question to start one."
-                      : "Import or select a repo to start chatting."}
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <form className="flex flex-col gap-2 border-t border-line pt-3 sm:flex-row sm:gap-3 sm:pt-4" onSubmit={handleChat}>
-            <textarea
-              className="min-h-16 flex-1 resize-none rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent sm:min-h-20 sm:text-base"
-              placeholder={selectedProject ? "Ask about the selected repo..." : "Select a project first"}
-              value={message}
-              onChange={(event) => setMessage(event.target.value)}
-              required
+            <ChatView
+              selectedProject={selectedProject}
+              selectedChat={selectedChat}
+              selectedProjectId={selectedProjectId}
+              currentMessages={currentMessages}
+              pendingQuestion={pendingQuestion}
+              pendingAction={pendingAction}
+              message={message}
+              busy={busy}
+              isLoadingMessages={isLoadingMessages}
+              messagesEndRef={messagesEndRef}
+              setMessage={setMessage}
+              onChat={handleChat}
             />
-            {/* <button
-              className="h-12 rounded-md bg-ink px-5 text-sm font-medium text-white disabled:opacity-60 sm:h-20"
-              disabled={busy || !selectedProjectId}
-            >
-              {pendingAction === "ask" ? "Thinking..." : "Ask"}
-            </button> */}
-
-            <button
-  className="h-12 rounded-md bg-ink px-5 text-sm font-medium text-white disabled:opacity-60 sm:h-20 flex items-center gap-2 transition-all duration-150 active:scale-[0.97]"
-  disabled={busy || !selectedProjectId}
-  type="submit"
->
-  {pendingAction === "ask" ? (
-    <>
-      <span className="inline-block w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-      Thinking...
-    </>
-  ) : (
-    <>
-      <Send size={25} />
-      
-    </>
-  )}
-</button>
-          </form>
-            </>
           ) : workspaceMode === "files" ? (
-            <div className="grid min-h-0 flex-1 gap-4 py-4 lg:grid-cols-[320px_1fr]">
-              <div className="flex min-h-0 flex-col rounded-md border border-line bg-panel">
-                <div className="border-b border-line p-3">
-                  <input
-                    className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm outline-none focus:border-accent"
-                    placeholder="Filter files"
-                    value={fileFilter}
-                    onChange={(event) => setFileFilter(event.target.value)}
-                    disabled={!selectedProjectId}
-                  />
-                  <p className="mt-2 text-xs text-zinc-500">
-                    {loadingFilesProjectId === selectedProjectId
-                      ? "Loading files..."
-                      : `${filteredFiles.length} files`}
-                  </p>
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto p-2">
-                  {filteredFiles.map((file) => (
-                    <button
-                      key={file.path}
-                      type="button"
-                      className={`mb-1 w-full rounded-md px-2 py-2 text-left text-xs transition ${
-                        selectedFilePath === file.path
-                          ? "bg-ink text-white"
-                          : "bg-white text-zinc-700 hover:bg-zinc-100"
-                      }`}
-                      onClick={() => handleOpenFile(file.path)}
-                    >
-                      <span className="block truncate font-medium">{file.path}</span>
-                      <span className={selectedFilePath === file.path ? "text-zinc-300" : "text-zinc-500"}>
-                        {formatBytes(file.size)}
-                      </span>
-                    </button>
-                  ))}
-                  {!selectedProject ? (
-                    <p className="p-3 text-sm text-zinc-500">Select a project to browse files.</p>
-                  ) : null}
-                  {selectedProject && !loadingFilesProjectId && filteredFiles.length === 0 ? (
-                    <p className="p-3 text-sm text-zinc-500">No matching files.</p>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="flex min-h-0 flex-col gap-4">
-                <div className="rounded-md border border-line bg-white p-3">
-                  <form className="flex flex-col gap-2 sm:flex-row" onSubmit={handleSearchCode}>
-                    <input
-                      className="min-w-0 flex-1 rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent"
-                      placeholder="Search code"
-                      value={codeSearch}
-                      onChange={(event) => setCodeSearch(event.target.value)}
-                      disabled={!selectedProjectId}
-                    />
-                    <button
-                      className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-                      disabled={busy || !selectedProjectId}
-                    >
-                      {pendingAction === "search-code" ? "Searching..." : "Search"}
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-md border border-line px-4 py-2 text-sm font-medium text-ink hover:bg-panel disabled:opacity-60"
-                      onClick={handleReadGitDiff}
-                      disabled={busy || !selectedProjectId}
-                    >
-                      {pendingAction === "git-diff" ? "Loading..." : "Git diff"}
-                    </button>
-                  </form>
-                  {searchResults.length > 0 ? (
-                    <div className="mt-3 max-h-44 overflow-y-auto rounded-md border border-line">
-                      {searchResults.map((result) => (
-                        <button
-                          key={`${result.file_path}:${result.line_number}:${result.line}`}
-                          type="button"
-                          className="block w-full border-b border-line px-3 py-2 text-left text-xs last:border-b-0 hover:bg-panel"
-                          onClick={() => handleOpenFile(result.file_path)}
-                        >
-                          <span className="font-medium text-ink">
-                            {result.file_path}:{result.line_number}
-                          </span>
-                          <span className="mt-1 block truncate text-zinc-600">{result.line}</span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                  {gitDiff ? (
-                    <pre className="mt-3 max-h-44 overflow-auto rounded-md bg-zinc-950 p-3 text-xs leading-5 text-zinc-100">
-                      <code>{gitDiff}</code>
-                    </pre>
-                  ) : null}
-                </div>
-
-                <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-line bg-white">
-                  {loadingFilePath === selectedFilePath ? (
-                    <div className="p-4 text-sm text-zinc-500">Loading file...</div>
-                  ) : selectedFileContent ? (
-                    <>
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2">
-                        <h3 className="min-w-0 truncate text-sm font-semibold">{selectedFileContent.path}</h3>
-                        <span className="text-xs text-zinc-500">
-                          {selectedFileContent.line_count} lines / {formatBytes(selectedFileContent.size)}
-                        </span>
-                      </div>
-                      <pre className="h-full max-h-[calc(100vh-330px)] overflow-auto bg-zinc-950 p-4 text-xs leading-5 text-zinc-100">
-                        <code>{selectedFileContent.content}</code>
-                      </pre>
-                    </>
-                  ) : (
-                    <div className="flex h-full min-h-72 items-center justify-center text-center">
-                      <div className="max-w-sm px-5">
-                        <p className="text-sm font-medium text-ink">File explorer ready.</p>
-                        <p className="mt-2 text-sm leading-6 text-zinc-500">
-                          Pick a file, search the codebase, or inspect the current git diff.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+            <FilesView
+              selectedProject={selectedProject}
+              selectedProjectId={selectedProjectId}
+              filteredFiles={filteredFiles}
+              selectedFilePath={selectedFilePath}
+              selectedFileContent={selectedFileContent}
+              fileFilter={fileFilter}
+              codeSearch={codeSearch}
+              searchResults={searchResults}
+              gitDiff={gitDiff}
+              loadingFilesProjectId={loadingFilesProjectId}
+              loadingFilePath={loadingFilePath}
+              busy={busy}
+              pendingAction={pendingAction}
+              setFileFilter={setFileFilter}
+              setCodeSearch={setCodeSearch}
+              onOpenFile={handleOpenFile}
+              onSearchCode={handleSearchCode}
+              onReadGitDiff={handleReadGitDiff}
+            />
           ) : workspaceMode === "navigator" ? (
-            <div className="min-h-0 flex-1 overflow-y-auto py-4">
-              <div className="mx-auto max-w-3xl rounded-md border border-line bg-white p-4 sm:p-5">
-                <div className="flex rounded-md border border-line bg-panel p-1 text-sm">
-                  <button
-                    type="button"
-                    className={`flex-1 rounded px-3 py-2 font-medium transition ${
-                      investigationMode === "navigator"
-                        ? "bg-white text-ink shadow-sm"
-                        : "text-zinc-600 hover:text-ink"
-                    }`}
-                    onClick={() => setInvestigationMode("navigator")}
-                  >
-                    Find area
-                  </button>
-                  <button
-                    type="button"
-                    className={`flex-1 rounded px-3 py-2 font-medium transition ${
-                      investigationMode === "bug"
-                        ? "bg-white text-ink shadow-sm"
-                        : "text-zinc-600 hover:text-ink"
-                    }`}
-                    onClick={() => setInvestigationMode("bug")}
-                  >
-                    Investigate bug
-                  </button>
-                </div>
-
-                <form className="mt-4 space-y-3" onSubmit={handleInvestigation}>
-                  <textarea
-                    className="min-h-36 w-full resize-none rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent"
-                    placeholder={
-                      investigationMode === "bug"
-                        ? "Describe the bug, error text, failing behavior, or screen involved..."
-                        : "Ask where a feature, route, symbol, or behavior is handled..."
-                    }
-                    value={investigationPrompt}
-                    onChange={(event) => setInvestigationPrompt(event.target.value)}
-                    disabled={!selectedProjectId || busy}
-                    required
-                  />
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-xs leading-5 text-zinc-500">
-                      Results are saved into the selected chat with source references.
-                    </p>
-                    <button
-                      className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-                      disabled={busy || !selectedProjectId}
-                    >
-                      {pendingAction === "investigate" ? "Investigating..." : "Run navigator"}
-                    </button>
-                  </div>
-                </form>
-
-                {currentMessages.length > 0 ? (
-                  <div className="mt-5 rounded-md border border-line bg-panel p-3 text-sm text-zinc-600">
-                    Latest saved result:{" "}
-                    <span className="font-medium text-ink">
-                      {currentMessages[currentMessages.length - 1].question}
-                    </span>
-                  </div>
-                ) : null}
-              </div>
-            </div>
+            <NavigatorView
+              selectedProjectId={selectedProjectId}
+              busy={busy}
+              pendingAction={pendingAction}
+              investigationMode={investigationMode}
+              investigationPrompt={investigationPrompt}
+              currentMessages={currentMessages}
+              setInvestigationMode={setInvestigationMode}
+              setInvestigationPrompt={setInvestigationPrompt}
+              onInvestigation={handleInvestigation}
+            />
           ) : workspaceMode === "editor" ? (
-            <div className="min-h-0 flex-1 overflow-y-auto py-4">
-              <div className="mx-auto grid max-w-5xl gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                <form className="rounded-md border border-line bg-white p-4 sm:p-5" onSubmit={handleCreateEditPreview}>
-                  <div className="grid gap-3">
-                    <div>
-                      <label className="text-xs font-semibold uppercase text-zinc-500">Action</label>
-                      <div className="mt-2 grid grid-cols-3 rounded-md border border-line bg-panel p-1 text-sm">
-                        {(["edit", "create", "delete"] as const).map((action) => (
-                          <button
-                            key={action}
-                            type="button"
-                            className={`rounded px-3 py-2 font-medium capitalize transition ${
-                              editAction === action ? "bg-white text-ink shadow-sm" : "text-zinc-600 hover:text-ink"
-                            }`}
-                            onClick={() => {
-                              setEditAction(action);
-                              setActiveEditChangeSet(null);
-                              if (action === "create") {
-                                setEditContent("");
-                              }
-                              if (action === "edit") {
-                                void loadEditorFileContent(editFilePath, true);
-                              }
-                            }}
-                          >
-                            {action}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-xs font-semibold uppercase text-zinc-500" htmlFor="edit-file-path">
-                        File path
-                      </label>
-                      <input
-                        id="edit-file-path"
-                        className="mt-2 w-full rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent"
-                        placeholder="src/example.ts"
-                        value={editFilePath}
-                        onChange={(event) => {
-                          setEditFilePath(event.target.value);
-                          setActiveEditChangeSet(null);
-                        }}
-                        onBlur={() => {
-                          void loadEditorFileContent();
-                        }}
-                        disabled={!selectedProjectId || busy}
-                        required
-                      />
-                    </div>
-
-                    {editAction !== "delete" ? (
-                      <div>
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <label className="text-xs font-semibold uppercase text-zinc-500" htmlFor="edit-content">
-                            Full file content
-                          </label>
-                          {editAction === "edit" ? (
-                            <button
-                              type="button"
-                              className="rounded-md border border-line px-2 py-1 text-xs font-medium text-ink hover:bg-panel disabled:opacity-60"
-                              onClick={() => {
-                                void loadEditorFileContent();
-                              }}
-                              disabled={!selectedProjectId || busy || !editFilePath.trim()}
-                            >
-                              {loadingEditFilePath ? "Loading..." : "Load current file"}
-                            </button>
-                          ) : null}
-                        </div>
-                        <textarea
-                          id="edit-content"
-                          className="mt-2 min-h-80 w-full resize-y rounded-md border border-line px-3 py-2 font-mono text-xs leading-5 outline-none focus:border-accent"
-                          placeholder={
-                            editAction === "edit"
-                              ? "Enter a file path above to load the current file..."
-                              : "Paste or write the complete file content to preview..."
-                          }
-                          value={editContent}
-                          onChange={(event) => setEditContent(event.target.value)}
-                          disabled={!selectedProjectId || busy || Boolean(loadingEditFilePath)}
-                          required
-                        />
-                      </div>
-                    ) : null}
-
-                    <button
-                      className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-                      disabled={busy || !selectedProjectId}
-                    >
-                      {pendingAction === "edit-preview" ? "Creating preview..." : "Preview diff"}
-                    </button>
-                  </div>
-                </form>
-
-                <div className="rounded-md border border-line bg-white p-4 sm:p-5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <h3 className="text-sm font-semibold text-ink">Change set</h3>
-                      <p className="mt-1 text-xs text-zinc-500">
-                        Preview first, then apply only after approval.
-                      </p>
-                    </div>
-                    {activeEditChangeSet ? (
-                      <span className="rounded bg-panel px-2 py-1 text-xs font-medium uppercase text-zinc-600">
-                        {activeEditChangeSet.status.replace("_", " ")}
-                      </span>
-                    ) : null}
-                  </div>
-
-                  {activeEditChangeSet ? (
-                    <div className="mt-4 space-y-3">
-                      <div className="rounded-md border border-line bg-panel p-3">
-                        <p className="text-xs font-semibold uppercase text-zinc-500">Proposed files</p>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {activeEditChangeSet.files.map((file) => (
-                            <span key={file} className="rounded bg-white px-2 py-1 text-xs text-zinc-700">
-                              {file}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      <pre className="max-h-[420px] overflow-auto rounded-md bg-zinc-950 p-3 text-xs leading-5 text-zinc-100">
-                        <code>{activeEditChangeSet.diff || "No diff available."}</code>
-                      </pre>
-
-                      <div className="flex flex-col gap-2 sm:flex-row">
-                        {activeEditChangeSet.status === "pending" ? (
-                          <>
-                            <button
-                              type="button"
-                              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-                              onClick={handleApplyEditChangeSet}
-                              disabled={busy}
-                            >
-                              {pendingAction === "edit-apply" ? "Applying..." : "Apply approved edit"}
-                            </button>
-                            <button
-                              type="button"
-                              className="rounded-md border border-line px-4 py-2 text-sm font-medium text-ink hover:bg-panel disabled:opacity-60"
-                              onClick={handleRejectEditChangeSet}
-                              disabled={busy}
-                            >
-                              {pendingAction === "edit-reject" ? "Rejecting..." : "Reject"}
-                            </button>
-                          </>
-                        ) : null}
-                        {activeEditChangeSet.status === "applied" ? (
-                          <button
-                            type="button"
-                            className="rounded-md border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
-                            onClick={handleRollbackEditChangeSet}
-                            disabled={busy}
-                          >
-                            {pendingAction === "edit-rollback" ? "Rolling back..." : "Rollback change set"}
-                          </button>
-                        ) : null}
-                      </div>
-
-                      {activeEditChangeSet.status === "applied" && reviewSuggestionFiles.length > 0 ? (
-                        <div className="rounded-md border border-accent/30 bg-accent/5 p-3">
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                              <p className="text-sm font-semibold text-ink">Review this change?</p>
-                              <p className="mt-1 text-xs leading-5 text-zinc-600">
-                                RepoMind can inspect the applied diff and suggest tests before you commit.
-                              </p>
-                            </div>
-                            <div className="flex flex-col gap-2 sm:flex-row">
-                              <button
-                                type="button"
-                                className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
-                                onClick={handleSuggestedCodeReview}
-                                disabled={busy}
-                              >
-                                {pendingAction === "code-review" ? "Reviewing..." : "Review change"}
-                              </button>
-                              <button
-                                type="button"
-                                className="rounded-md border border-line px-3 py-2 text-sm font-medium text-ink hover:bg-panel disabled:opacity-60"
-                                onClick={() => {
-                                  setReviewSuggestionFiles([]);
-                                  setReviewSuggestionChangeSetId("");
-                                }}
-                                disabled={busy}
-                              >
-                                Ignore
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <div className="mt-4 rounded-md border border-dashed border-line bg-panel p-5 text-sm leading-6 text-zinc-600">
-                      Create a preview to see the exact paths and diff before any local file is touched.
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+            <EditorView
+              selectedProjectId={selectedProjectId}
+              busy={busy}
+              pendingAction={pendingAction}
+              editAction={editAction}
+              editFilePath={editFilePath}
+              editContent={editContent}
+              activeEditChangeSet={activeEditChangeSet}
+              loadingEditFilePath={loadingEditFilePath}
+              reviewSuggestionFiles={reviewSuggestionFiles}
+              setEditAction={setEditAction}
+              setEditFilePath={setEditFilePath}
+              setEditContent={setEditContent}
+              setActiveEditChangeSet={setActiveEditChangeSet}
+              clearReviewSuggestion={() => {
+                setReviewSuggestionFiles([]);
+                setReviewSuggestionChangeSetId("");
+              }}
+              loadEditorFileContent={loadEditorFileContent}
+              onCreateEditPreview={handleCreateEditPreview}
+              onApplyEdit={handleApplyEditChangeSet}
+              onRejectEdit={handleRejectEditChangeSet}
+              onRollbackEdit={handleRollbackEditChangeSet}
+              onSuggestedCodeReview={handleSuggestedCodeReview}
+            />
           ) : workspaceMode === "planner" ? (
-            <div className="min-h-0 flex-1 overflow-y-auto py-4">
-              <div className="mx-auto max-w-3xl rounded-md border border-line bg-white p-4 sm:p-5">
-                <form className="space-y-3" onSubmit={handleChangePlan}>
-                  <textarea
-                    className="min-h-36 w-full resize-none rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent"
-                    placeholder="Describe the feature, fix, refactor, or file change you want planned..."
-                    value={plannerPrompt}
-                    onChange={(event) => setPlannerPrompt(event.target.value)}
-                    disabled={!selectedProjectId || busy}
-                    required
-                  />
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-xs leading-5 text-zinc-500">
-                      Plans are saved into chat. File edits stay locked behind approval.
-                    </p>
-                    <button
-                      className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-                      disabled={busy || !selectedProjectId}
-                    >
-                      {pendingAction === "plan-change" ? "Planning..." : "Create plan"}
-                    </button>
-                  </div>
-                </form>
-
-                <div className="mt-5 rounded-md border border-line bg-panel p-3 text-sm text-zinc-600">
-                  Approval gate: RepoMind will only propose files, risks, and tests in this goal.
-                </div>
-
-                {currentMessages.length > 0 ? (
-                  <div className="mt-3 rounded-md border border-line bg-panel p-3 text-sm text-zinc-600">
-                    Latest saved result:{" "}
-                    <span className="font-medium text-ink">
-                      {currentMessages[currentMessages.length - 1].question}
-                    </span>
-                  </div>
-                ) : null}
-              </div>
-            </div>
+            <PlannerView
+              selectedProjectId={selectedProjectId}
+              busy={busy}
+              pendingAction={pendingAction}
+              plannerPrompt={plannerPrompt}
+              activeEditChangeSet={activeEditChangeSet}
+              plannerChangeSetId={plannerChangeSetId}
+              plannerAutomationPrompt={plannerAutomationPrompt}
+              plannerAutomationStatus={plannerAutomationStatus}
+              commitPreview={commitPreview}
+              createdCommit={createdCommit}
+              currentMessages={currentMessages}
+              setPlannerPrompt={setPlannerPrompt}
+              setCommitMessage={(value) => updateCommitPreviewField("commit_message", value)}
+              setPrTitle={(value) => updateCommitPreviewField("pr_title", value)}
+              setPrDescription={(value) => updateCommitPreviewField("pr_description", value)}
+              onChangePlan={handleChangePlan}
+              onApproveEdit={handleApprovePlannerAutomation}
+              onCreateCommit={handleCreateCommit}
+              onRejectEdit={handleRejectEditChangeSet}
+              onApproveReview={handleApprovePlannerReview}
+              onSkipReview={() => {
+                setPlannerChangeSetId("");
+                setPlannerAutomationPrompt("");
+                setPlannerAutomationChatId("");
+                setPlannerAutomationStatus("");
+                setCommitPreview(null);
+                setCreatedCommit(null);
+                setReviewSuggestionFiles([]);
+                setReviewSuggestionChangeSetId("");
+              }}
+            />
+          ) : workspaceMode === "review" ? (
+            <ReviewView
+              selectedProjectId={selectedProjectId}
+              busy={busy}
+              pendingAction={pendingAction}
+              reviewPrompt={reviewPrompt}
+              currentMessages={currentMessages}
+              setReviewPrompt={setReviewPrompt}
+              onCodeReview={handleCodeReview}
+            />
           ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto py-4">
-              <div className="mx-auto max-w-3xl rounded-md border border-line bg-white p-4 sm:p-5">
-                <form className="space-y-3" onSubmit={handleCodeReview}>
-                  <textarea
-                    className="min-h-36 w-full resize-none rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent"
-                    placeholder="Optional: describe the changed feature, risk area, or test focus..."
-                    value={reviewPrompt}
-                    onChange={(event) => setReviewPrompt(event.target.value)}
-                    disabled={!selectedProjectId || busy}
-                  />
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-xs leading-5 text-zinc-500">
-                      Reviews inspect the current git diff and save findings into chat.
-                    </p>
-                    <button
-                      className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-                      disabled={busy || !selectedProjectId}
-                    >
-                      {pendingAction === "code-review" ? "Reviewing..." : "Review changes"}
-                    </button>
-                  </div>
-                </form>
-
-                <div className="mt-5 rounded-md border border-line bg-panel p-3 text-sm text-zinc-600">
-                  Test commands are suggested only; run them after you approve the check.
-                </div>
-
-                {currentMessages.length > 0 ? (
-                  <div className="mt-3 rounded-md border border-line bg-panel p-3 text-sm text-zinc-600">
-                    Latest saved result:{" "}
-                    <span className="font-medium text-ink">
-                      {currentMessages[currentMessages.length - 1].question}
-                    </span>
-                  </div>
-                ) : null}
-              </div>
-            </div>
+            <CommitView
+              selectedProjectId={selectedProjectId}
+              busy={busy}
+              pendingAction={pendingAction}
+              commitContext={commitContext}
+              commitPreview={commitPreview}
+              createdCommit={createdCommit}
+              setCommitContext={setCommitContext}
+              setCommitMessage={(value) => updateCommitPreviewField("commit_message", value)}
+              setPrTitle={(value) => updateCommitPreviewField("pr_title", value)}
+              setPrDescription={(value) => updateCommitPreviewField("pr_description", value)}
+              onPreviewCommit={handlePreviewCommit}
+              onCreateCommit={handleCreateCommit}
+            />
           )}
         </section>
       </div>

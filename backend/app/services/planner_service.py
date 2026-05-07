@@ -2,6 +2,7 @@ import re
 
 from app.models.schemas import SourceChunk
 from app.services.codebase_tools import read_file, search_code
+from app.services.context_utils import full_file_chunks_for_message, merge_context_chunks
 from app.services.llm_provider import LLMProviderError, generate_answer
 from app.services.vector_store import search_chunks
 
@@ -52,6 +53,7 @@ def _dedupe_chunks(chunks: list[dict]) -> list[dict]:
 
 async def collect_planning_evidence(project_id: str, message: str) -> list[dict]:
     chunks = await search_chunks(project_id, message, limit=MAX_PLAN_CHUNKS)
+    explicit_file_chunks = await full_file_chunks_for_message(project_id, message)
     keyword_hits = []
 
     for keyword in _keywords(message):
@@ -92,15 +94,16 @@ async def collect_planning_evidence(project_id: str, message: str) -> list[dict]
             }
         )
 
-    return _dedupe_chunks(chunks)[:MAX_TOTAL_EVIDENCE]
+    return _dedupe_chunks(merge_context_chunks(explicit_file_chunks, chunks))[:MAX_TOTAL_EVIDENCE]
 
 
-async def plan_change(project_id: str, message: str) -> tuple[str, list[SourceChunk]]:
+async def plan_change(project_id: str, message: str) -> tuple[str, list[SourceChunk], list[dict] | None]:
     chunks = await collect_planning_evidence(project_id, message)
     sources = [SourceChunk(**chunk) for chunk in chunks]
+    proposed_operations = _proposed_operations_from_request(message)
     direct_plan = _direct_change_plan(message, chunks)
     if direct_plan:
-        return direct_plan, sources
+        return direct_plan, sources, proposed_operations
 
     prompt = _planning_prompt(message, chunks)
 
@@ -113,7 +116,67 @@ async def plan_change(project_id: str, message: str) -> tuple[str, list[SourceCh
 
     answer = _normalize_plan_answer(answer, message, chunks)
 
-    return answer, sources
+    return answer, sources, proposed_operations
+
+
+def _proposed_operations_from_request(message: str) -> list[dict] | None:
+    action = _requested_file_action(message)
+    if not action:
+        return None
+
+    path = _requested_file_path(message)
+    if not path:
+        return None
+
+    if action == "delete":
+        return [{"action": action, "path": path}]
+
+    content = _requested_file_content(message)
+    if content is None:
+        return None
+
+    return [{"action": action, "path": path, "content": content}]
+
+
+def _requested_file_action(message: str) -> str | None:
+    lowered = message.lower()
+    if re.search(r"\b(delete|remove)\b.*\bfile\b|\bfile\b.*\b(delete|remove)\b", lowered):
+        return "delete"
+    if re.search(r"\b(create|add|new)\b.*\bfile\b|\bfile\b.*\b(create|add|new)\b", lowered):
+        return "create"
+    if re.search(r"\b(edit|update|replace|modify)\b.*\bfile\b|\bfile\b.*\b(edit|update|replace|modify)\b", lowered):
+        return "edit"
+    return None
+
+
+def _requested_file_path(message: str) -> str | None:
+    patterns = [
+        r"(?:path|file path|filepath)\s*[:=]\s*`?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)`?",
+        r"(?:create|add|new|edit|update|replace|modify|delete|remove)\s+(?:a\s+|the\s+)?(?:file\s+)?`?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)`?",
+        r"(?:file|called|named)\s+`?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)`?",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, message, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip().replace("\\", "/")
+    return None
+
+
+def _requested_file_content(message: str) -> str | None:
+    fenced = re.search(r"```[a-zA-Z0-9_-]*\n?([\s\S]*?)```", message)
+    if fenced:
+        return fenced.group(1).rstrip("\n")
+
+    marker = re.search(
+        r"(?:content|contents|write|with this|put this)\s*[:=]?\s*([\s\S]+)$",
+        message,
+        flags=re.IGNORECASE,
+    )
+    if not marker:
+        return None
+
+    content = marker.group(1).strip()
+    return content or None
 
 
 def _direct_change_plan(message: str, chunks: list[dict]) -> str | None:
