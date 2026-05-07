@@ -3,6 +3,7 @@ from difflib import unified_diff
 from pathlib import Path
 
 from git import Repo
+from git.exc import GitCommandError
 
 from app.services.file_scanner import IGNORED_DIRS, IGNORED_FILES, TEXT_EXTENSIONS
 from app.services.llm_provider import LLMProviderError, generate_answer
@@ -51,14 +52,62 @@ async def create_commit(project_id: str, commit_message: str) -> dict:
     diff = _full_diff(root, repo)
     changed_files = _changed_files(repo, diff)
     if not diff.strip():
-        raise ValueError("No uncommitted changes to commit")
+        commit = repo.head.commit
+        push_result = _push_commit(repo)
+        return {
+            "commit_hash": commit.hexsha,
+            "commit_message": commit.message.strip(),
+            "changed_files": [],
+            "branch": push_result["branch"],
+            "remote": push_result["remote"],
+            "pushed": push_result["pushed"],
+            "push_summary": push_result["push_summary"],
+        }
 
     repo.git.add("-A")
     commit = repo.index.commit(commit_message.strip())
+    push_result = _push_commit(repo)
     return {
         "commit_hash": commit.hexsha,
         "commit_message": commit.message.strip(),
         "changed_files": changed_files,
+        "branch": push_result["branch"],
+        "remote": push_result["remote"],
+        "pushed": push_result["pushed"],
+        "push_summary": push_result["push_summary"],
+    }
+
+
+def _push_commit(repo: Repo) -> dict:
+    try:
+        branch = repo.active_branch.name
+    except TypeError as exc:
+        raise ValueError("Cannot push from a detached HEAD. Check out a branch first.") from exc
+
+    if "origin" not in [remote.name for remote in repo.remotes]:
+        raise ValueError("Cannot push commit because this repository has no origin remote.")
+
+    remote = repo.remote("origin")
+    try:
+        results = remote.push(refspec=f"{branch}:{branch}")
+    except GitCommandError as exc:
+        details = (exc.stderr or exc.stdout or str(exc)).strip()
+        raise ValueError(f"Commit was created, but GitHub push failed: {details}") from exc
+
+    summaries = [result.summary.strip() for result in results if result.summary]
+    errors = [
+        result.summary.strip()
+        for result in results
+        if result.flags & (result.ERROR | result.REJECTED | result.REMOTE_REJECTED)
+    ]
+    if errors:
+        raise ValueError(f"Commit was created, but GitHub push failed: {'; '.join(errors)}")
+
+    return {
+        "branch": branch,
+        "remote": "origin",
+        "pushed": True,
+        "push_summary": "; ".join(summaries) or f"Pushed to origin/{branch}",
     }
 
 

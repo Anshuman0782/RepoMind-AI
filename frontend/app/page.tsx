@@ -924,7 +924,7 @@ export default function Home() {
     }
 
     const confirmed = window.confirm(
-      "Create a local commit with all current repository changes?",
+      "Commit all current repository changes and push this commit to GitHub?",
     );
     if (!confirmed) {
       return;
@@ -937,7 +937,7 @@ export default function Home() {
       setCreatedCommit(commit);
       setCommitPreview((current) => (current ? { ...current, diff: "" } : current));
       if (activeEditChangeSet?.id === plannerChangeSetId) {
-        setPlannerAutomationStatus("Local commit created. Review Agent is still available for a final check.");
+        setPlannerAutomationStatus(`Commit pushed to ${commit.remote}/${commit.branch}. Review Agent is still available for a final check.`);
       }
       setGitDiff("No uncommitted changes.");
     } catch (err) {
@@ -986,7 +986,7 @@ export default function Home() {
       setCommitPreview(commitDraft);
       setPlannerAutomationStatus(
         commitDraft.has_changes
-          ? "Commit Assistant drafted commit and PR copy. Commit and Review Agent both require your approval."
+          ? "Commit Assistant drafted commit and PR copy. GitHub push and Review Agent both require your approval."
           : "Edit applied, but Commit Assistant did not find an uncommitted diff. Review Agent is ready after approval.",
       );
       setReviewSuggestionFiles(updated.files);

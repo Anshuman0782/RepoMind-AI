@@ -52,7 +52,7 @@ export function CommitView({
           />
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs leading-5 text-zinc-500">
-              Preview reads the current diff and drafts commit and PR copy. Commit remains a separate approval.
+              Preview reads the current diff and drafts commit and PR copy. GitHub push remains a separate approval.
             </p>
             <button
               className="inline-flex items-center justify-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
@@ -91,7 +91,7 @@ export function CommitView({
                   disabled={busy || Boolean(createdCommit) || !commitPreview.commit_message.trim()}
                 >
                   <GitCommitHorizontal size={16} />
-                  {pendingAction === "create-commit" ? "Committing..." : createdCommit ? "Committed" : "Commit"}
+                  {pendingAction === "create-commit" ? "Pushing..." : createdCommit ? "Pushed" : "Commit and push"}
                 </button>
               </section>
 
@@ -135,9 +135,12 @@ export function CommitView({
                 <section className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
                   <div className="flex items-center gap-2 font-semibold">
                     <Check size={16} />
-                    Commit created
+                    Commit pushed
                   </div>
                   <p className="mt-2 font-mono text-xs">{createdCommit.commit_hash.slice(0, 12)}</p>
+                  <p className="mt-1 text-xs">
+                    {createdCommit.remote}/{createdCommit.branch}
+                  </p>
                 </section>
               ) : null}
             </aside>

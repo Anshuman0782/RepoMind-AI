@@ -81,6 +81,10 @@ export type CreatedCommit = {
   commit_hash: string;
   commit_message: string;
   changed_files: string[];
+  branch: string;
+  remote: string;
+  pushed: boolean;
+  push_summary: string;
 };
 
 export async function createProject(name: string, repoUrl: string): Promise<Project> {

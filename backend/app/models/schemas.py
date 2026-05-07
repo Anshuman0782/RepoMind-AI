@@ -118,6 +118,10 @@ class CreateCommitResponse(BaseModel):
     commit_hash: str
     commit_message: str
     changed_files: list[str]
+    branch: str
+    remote: str
+    pushed: bool
+    push_summary: str
 
 
 class SourceChunk(BaseModel):

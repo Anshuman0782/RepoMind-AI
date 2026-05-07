@@ -147,12 +147,12 @@ or explain a file/module...`}
                       <div>
                         <p className="text-sm font-semibold text-ink">Commit Assistant draft</p>
                         <p className="mt-1 text-xs leading-5 text-zinc-600">
-                          Generated from the current diff. Local commit still needs your approval.
+                          Generated from the current diff. GitHub push still needs your approval.
                         </p>
                       </div>
                       {createdCommit ? (
                         <span className="rounded bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
-                          committed {createdCommit.commit_hash.slice(0, 8)}
+                          pushed {createdCommit.commit_hash.slice(0, 8)}
                         </span>
                       ) : null}
                     </div>
@@ -197,7 +197,7 @@ or explain a file/module...`}
                         onClick={onCreateCommit}
                         disabled={busy || Boolean(createdCommit) || !commitPreview.commit_message.trim()}
                       >
-                        {pendingAction === "create-commit" ? "Committing..." : createdCommit ? "Committed" : "Approve local commit"}
+                        {pendingAction === "create-commit" ? "Pushing..." : createdCommit ? "Pushed" : "Approve commit and push"}
                       </button>
                     </div>
                   </div>

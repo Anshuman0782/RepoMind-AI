@@ -1,6 +1,6 @@
 # ChromaDB And GitHub Guide
 
-This guide explains what ChromaDB is, what this project currently does, how embeddings are selected for local/cloud use, and how to connect/push the project to GitHub.
+This guide explains what ChromaDB is, what this project currently does, and how embeddings are selected for local/cloud use.
 
 ## 1. What ChromaDB Is
 
@@ -358,57 +358,7 @@ GROQ_API_KEY=
 GEMINI_API_KEY=
 ```
 
-## 8. GitHub Connection
-
-This project already has a Git remote configured:
-
-```text
-origin  https://github.com/Anshuman0782/RepoMind-AI.git
-```
-
-Check it with:
-
-```powershell
-git remote -v
-```
-
-Check changed files:
-
-```powershell
-git status
-```
-
-Stage changes:
-
-```powershell
-git add .
-```
-
-Commit changes:
-
-```powershell
-git commit -m "Add ChromaDB and GitHub setup guide"
-```
-
-Push to GitHub:
-
-```powershell
-git push origin main
-```
-
-If your branch is not `main`, check it:
-
-```powershell
-git branch --show-current
-```
-
-Then push that branch:
-
-```powershell
-git push origin YOUR_BRANCH_NAME
-```
-
-## 9. Local To Actual Deployment Path
+## 8. Local To Actual Deployment Path
 
 Here is the clean path from local MVP to real hosted app.
 
@@ -461,7 +411,7 @@ Before real users:
 - Protect API keys.
 - Avoid sending secrets or ignored files to the LLM.
 
-## 10. Simple Mental Model
+## 9. Simple Mental Model
 
 Think of RepoMind AI like this:
 
