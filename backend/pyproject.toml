@@ -16,15 +16,14 @@ dependencies = [
     "pydantic==2.7.4",
     "python-multipart>=0.0.27",
     "google-genai>=1.46.0",
+    "chromadb==0.6.3",
 ]
 
 [project.optional-dependencies]
 agent = [
     "langchain==0.3.14",
     "langgraph==0.2.62",
-    "chromadb==0.6.3",
 ]
 
 [tool.uv]
 package = false
-

@@ -28,7 +28,7 @@ from app.services.editing_tools import (
     rollback_edit_change_set,
 )
 from app.services.repo_service import create_project
-from app.services.vector_store import index_path
+from app.services.vector_store import delete_collection
 
 
 router = APIRouter()
@@ -197,12 +197,7 @@ async def delete_project(project_id: str) -> None:
     await db.edit_change_sets.delete_many({"project_id": project_id})
     await db.projects.delete_one({"_id": project_id})
 
-    vector_path = index_path(project_id)
-    if vector_path.exists():
-        try:
-            vector_path.unlink()
-        except OSError:
-            pass
+    await delete_collection(project_id)
 
     local_path = project.get("local_path")
     if local_path:

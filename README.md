@@ -9,7 +9,7 @@ It lets a user import a GitHub repo or upload project files, index the codebase,
 - Frontend: Next.js, TypeScript, Tailwind CSS
 - Backend: FastAPI, Python
 - App database: MongoDB
-- Vector index: local JSON vector index for MVP, ChromaDB later
+- Vector index: ChromaDB persistent local vector database
 - Embeddings: built-in local hash embeddings for MVP, SentenceTransformers later
 - LLM providers: Groq, Gemini, or Ollama
 - Agent workflow: LangGraph in phase 2
@@ -86,7 +86,7 @@ http://localhost:3000
 1. Create a project from a GitHub URL.
 2. Backend clones the repo into `backend/data/repos`.
 3. Files are scanned and chunked.
-4. Chunks are embedded locally and stored in a simple vector index.
+4. Chunks are embedded locally and stored in ChromaDB.
 5. User asks a question.
 6. Backend retrieves relevant chunks.
 7. LLM answers using Groq, Gemini, or Ollama.

@@ -1,12 +1,22 @@
 import hashlib
-import json
+import logging
 import math
 import re
+
+import chromadb
+from chromadb.config import Settings as ChromaSettings
 
 from app.core.config import settings
 
 
 EMBEDDING_DIMENSIONS = 384
+
+logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.CRITICAL)
+
+client = chromadb.PersistentClient(
+    path=str(settings.chroma_dir),
+    settings=ChromaSettings(anonymized_telemetry=False),
+)
 
 
 def embed_text(text: str) -> list[float]:
@@ -29,43 +39,56 @@ def collection_name(project_id: str) -> str:
     return f"project_{project_id.replace('-', '_')}"
 
 
-def index_path(project_id: str):
-    return settings.chroma_dir / f"{collection_name(project_id)}.json"
+def get_collection(project_id: str):
+    return client.get_or_create_collection(name=collection_name(project_id))
 
 
-def cosine_similarity(left: list[float], right: list[float]) -> float:
-    return sum(left_value * right_value for left_value, right_value in zip(left, right))
+async def delete_collection(project_id: str) -> None:
+    try:
+        client.delete_collection(name=collection_name(project_id))
+    except ValueError:
+        pass
 
 
 async def upsert_chunks(project_id: str, chunks: list[dict]) -> None:
     if not chunks:
         return
 
-    records = []
-    for chunk in chunks:
-        records.append(
+    collection = get_collection(project_id)
+    collection.upsert(
+        ids=[f"{chunk['file_path']}:{chunk['start_line']}" for chunk in chunks],
+        embeddings=[embed_text(chunk["content"]) for chunk in chunks],
+        documents=[chunk["content"] for chunk in chunks],
+        metadatas=[
             {
-                "id": f"{chunk['file_path']}:{chunk['start_line']}",
-                "embedding": embed_text(chunk["content"]),
-                "chunk": chunk,
+                "file_path": chunk["file_path"],
+                "start_line": chunk["start_line"],
+                "end_line": chunk["end_line"],
             }
-        )
-
-    index_path(project_id).write_text(json.dumps(records), encoding="utf-8")
+            for chunk in chunks
+        ],
+    )
 
 
 async def search_chunks(project_id: str, query: str, limit: int = 5) -> list[dict]:
-    path = index_path(project_id)
-    if not path.exists():
+    collection = get_collection(project_id)
+    if collection.count() == 0:
         return []
 
-    records = json.loads(path.read_text(encoding="utf-8"))
-    query_embedding = embed_text(query)
-
-    ranked = sorted(
-        records,
-        key=lambda record: cosine_similarity(query_embedding, record["embedding"]),
-        reverse=True,
+    results = collection.query(
+        query_embeddings=[embed_text(query)],
+        n_results=limit,
     )
 
-    return [record["chunk"] for record in ranked[:limit]]
+    documents = results.get("documents", [[]])[0]
+    metadatas = results.get("metadatas", [[]])[0]
+
+    return [
+        {
+            "file_path": metadata["file_path"],
+            "start_line": metadata["start_line"],
+            "end_line": metadata["end_line"],
+            "content": document,
+        }
+        for document, metadata in zip(documents, metadatas)
+    ]
