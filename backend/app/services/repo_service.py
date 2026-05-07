@@ -6,7 +6,7 @@ from git import Repo
 from app.core.config import settings
 from app.core.database import db
 from app.services.file_scanner import chunk_file, iter_code_files
-from app.services.vector_store import upsert_chunks
+from app.services.vector_store import delete_collection, upsert_chunks
 
 
 async def create_project(name: str, repo_url: str) -> dict:
@@ -34,9 +34,45 @@ async def create_project(name: str, repo_url: str) -> dict:
     return project
 
 
+async def reindex_project(project_id: str) -> dict:
+    project = await db.projects.find_one({"_id": project_id})
+    if not project:
+        raise ValueError("Project not found")
+
+    project_dir = Path(project["local_path"])
+    if not project_dir.exists():
+        raise ValueError("Project files are missing locally")
+
+    await db.projects.update_one(
+        {"_id": project_id},
+        {"$set": {"status": "indexing"}},
+    )
+
+    try:
+        chunks = []
+        for file_path in iter_code_files(project_dir):
+            chunks.extend(chunk_file(file_path, project_dir))
+
+        await delete_collection(project_id)
+        await upsert_chunks(project_id, chunks)
+
+        updates = {
+            "status": "indexed",
+            "file_count": len({chunk["file_path"] for chunk in chunks}),
+            "chunk_count": len(chunks),
+        }
+        await db.projects.update_one({"_id": project_id}, {"$set": updates})
+        return {**project, **updates}
+    except Exception:
+        await db.projects.update_one(
+            {"_id": project_id},
+            {"$set": {"status": "index_failed"}},
+        )
+        raise
+
+
 async def get_project_path(project_id: str) -> Path:
     project = await db.projects.find_one({"_id": project_id})
     if not project:
         raise ValueError("Project not found")
     return Path(project["local_path"])
-

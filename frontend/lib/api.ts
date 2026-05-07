@@ -115,6 +115,18 @@ export async function deleteProject(projectId: string): Promise<void> {
   }
 }
 
+export async function reindexProject(projectId: string): Promise<Project> {
+  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/reindex`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return response.json();
+}
+
 export async function listProjectFiles(projectId: string): Promise<FileEntry[]> {
   const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/files`);
   if (!response.ok) {

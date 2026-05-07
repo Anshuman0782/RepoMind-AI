@@ -159,10 +159,10 @@ project_<project_id>
 For Ollama embeddings:
 
 ```text
-project_<project_id>_ollama_<model_name>
+project_<project_id_prefix>_<embedding_signature_hash>
 ```
 
-This matters because different embedding models can produce vectors with different dimensions. Keeping separate collections avoids ChromaDB dimension conflicts.
+The provider/model part is shortened with a deterministic hash so ChromaDB collection names stay under the 63-character limit. This matters because different embedding models can produce vectors with different dimensions. Keeping separate collections avoids ChromaDB dimension conflicts.
 
 ### Store Chunks
 
@@ -192,6 +192,30 @@ This returns the same chunk shape the rest of the app already expects:
   "end_line": 30,
   "content": "..."
 }
+```
+
+### Re-index Existing Projects
+
+After changing the embedding provider or embedding model, re-index existing projects:
+
+```text
+POST /api/projects/<project_id>/reindex
+```
+
+The app also has a project sidebar `Index` button for this.
+
+Re-indexing does this:
+
+1. Loads the existing project from MongoDB.
+2. Re-scans the local repo folder.
+3. Deletes old ChromaDB collections for that project.
+4. Stores fresh chunks with the current embedding provider.
+5. Updates project status, file count, and chunk count.
+
+If re-indexing fails, the project status becomes:
+
+```text
+index_failed
 ```
 
 ## 5. Embedding Provider Setup

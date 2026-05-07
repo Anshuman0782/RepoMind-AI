@@ -27,7 +27,7 @@ from app.services.editing_tools import (
     reject_edit_change_set,
     rollback_edit_change_set,
 )
-from app.services.repo_service import create_project
+from app.services.repo_service import create_project, reindex_project
 from app.services.vector_store import delete_collection
 
 
@@ -70,6 +70,23 @@ async def list_project_files(project_id: str) -> list[FileEntryResponse]:
         return await list_files(project_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{project_id}/reindex", response_model=ProjectResponse)
+async def reindex_project_endpoint(project_id: str) -> ProjectResponse:
+    try:
+        project = await reindex_project(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ProjectResponse(
+        id=project["_id"],
+        name=project["name"],
+        repo_url=project["repo_url"],
+        status=project["status"],
+    )
 
 
 @router.get("/{project_id}/files/content", response_model=FileContentResponse)

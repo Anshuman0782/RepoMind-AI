@@ -20,6 +20,7 @@ type ProjectSidebarProps = {
   onCreateProject: (event: FormEvent<HTMLFormElement>) => void;
   onCreateChat: () => void;
   onDeleteProject: (projectId: string) => void;
+  onReindexProject: (projectId: string) => void;
   onDeleteChat: (chatId: string) => void;
   onRenameChat: (event: FormEvent<HTMLFormElement>, chatId: string) => void;
   onSelectProject: (project: Project) => void;
@@ -48,6 +49,7 @@ export function ProjectSidebar({
   onCreateProject,
   onCreateChat,
   onDeleteProject,
+  onReindexProject,
   onDeleteChat,
   onRenameChat,
   onSelectProject,
@@ -114,7 +116,7 @@ export function ProjectSidebar({
               >
                 <button
                   type="button"
-                  className="min-w-0 w-full pr-14 text-left"
+                  className="min-w-0 w-full pr-24 text-left"
                   onClick={() => onSelectProject(project)}
                 >
                   <span className="flex items-center justify-between gap-2">
@@ -124,6 +126,15 @@ export function ProjectSidebar({
                     </span>
                   </span>
                   <span className="block truncate text-xs text-zinc-500">{project.repo_url}</span>
+                </button>
+                <button
+                  type="button"
+                  className="absolute right-14 top-2 rounded-md px-2 py-1 text-xs text-zinc-500 opacity-0 transition hover:bg-white hover:text-ink group-hover/project:opacity-100 group-focus-within/project:opacity-100 disabled:opacity-40"
+                  onClick={() => onReindexProject(project.id)}
+                  disabled={busy}
+                  title="Re-index project"
+                >
+                  {pendingAction === "reindex-project" ? "..." : "Index"}
                 </button>
                 <button
                   type="button"

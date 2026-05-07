@@ -27,6 +27,7 @@ import {
   listProjects,
   readProjectFile,
   rejectEditChangeSet,
+  reindexProject,
   previewCommitAssistant,
   renameChatSession,
   rollbackEditChangeSet,
@@ -364,6 +365,54 @@ export default function Home() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete project");
+    } finally {
+      setPendingAction("");
+    }
+  }
+
+  async function handleReindexProject(projectId: string) {
+    const project = projects.find((item) => item.id === projectId);
+    const confirmed = window.confirm(
+      `Re-index ${project?.name ?? "this project"} using the current embedding provider?`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setPendingAction("reindex-project");
+    setError("");
+    try {
+      setProjects((current) =>
+        current.map((item) => (item.id === projectId ? { ...item, status: "indexing" } : item)),
+      );
+      const updatedProject = await reindexProject(projectId);
+      setProjects((current) =>
+        current.map((item) => (item.id === projectId ? updatedProject : item)),
+      );
+      setFilesByProject((current) => {
+        const next = { ...current };
+        delete next[projectId];
+        return next;
+      });
+      setFileContentsByKey((current) => {
+        const next: Record<string, FileContent> = {};
+        for (const [key, value] of Object.entries(current)) {
+          if (!key.startsWith(`${projectId}:`)) {
+            next[key] = value;
+          }
+        }
+        return next;
+      });
+      if (selectedProjectId === projectId) {
+        setSelectedFilePath("");
+        setSearchResults([]);
+        setGitDiff("");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to re-index project");
+      setProjects((current) =>
+        current.map((item) => (item.id === projectId ? { ...item, status: project?.status ?? item.status } : item)),
+      );
     } finally {
       setPendingAction("");
     }
@@ -1066,6 +1115,7 @@ export default function Home() {
           onCreateProject={handleCreateProject}
           onCreateChat={handleCreateChat}
           onDeleteProject={handleDeleteProject}
+          onReindexProject={handleReindexProject}
           onDeleteChat={handleDeleteChat}
           onRenameChat={handleRenameChat}
           onSelectProject={(project) => {

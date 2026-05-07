@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import re
 
@@ -21,13 +22,18 @@ def collection_name(project_id: str) -> str:
     safe_embedding = re.sub(r"[^a-zA-Z0-9_]+", "_", embedding_signature())
     if safe_embedding == "hash":
         return f"project_{safe_project_id}"
-    return f"project_{safe_project_id}_{safe_embedding}"
+
+    embedding_hash = hashlib.sha256(safe_embedding.encode("utf-8")).hexdigest()[:12]
+    return f"project_{safe_project_id[:8]}_{embedding_hash}"
 
 
 def get_collection(project_id: str):
     return client.get_or_create_collection(
         name=collection_name(project_id),
-        metadata={"embedding_provider": embedding_signature()},
+        metadata={
+            "project_id": project_id,
+            "embedding_provider": embedding_signature(),
+        },
     )
 
 
@@ -35,8 +41,18 @@ async def delete_collection(project_id: str) -> None:
     base_collection_name = f"project_{project_id.replace('-', '_')}"
     for collection in client.list_collections():
         collection_name_value = collection if isinstance(collection, str) else collection.name
+        metadata = {}
+        if isinstance(collection, str):
+            try:
+                metadata = client.get_collection(name=collection).metadata or {}
+            except ValueError:
+                metadata = {}
+        else:
+            metadata = collection.metadata or {}
+
         if (
-            collection_name_value == base_collection_name
+            metadata.get("project_id") == project_id
+            or collection_name_value == base_collection_name
             or collection_name_value.startswith(f"{base_collection_name}_")
         ):
             try:
