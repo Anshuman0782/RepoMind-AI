@@ -1,6 +1,6 @@
 # ChromaDB And GitHub Guide
 
-This guide explains what ChromaDB is, what this project currently does, how to move from the current local vector index to real ChromaDB, and how to connect/push the project to GitHub.
+This guide explains what ChromaDB is, what this project currently does, how embeddings are selected for local/cloud use, and how to connect/push the project to GitHub.
 
 ## 1. What ChromaDB Is
 
@@ -32,7 +32,7 @@ For RepoMind AI, ChromaDB is useful because the assistant needs to understand a 
 
 ## 2. What This Project Does Right Now
 
-The current backend does not use real ChromaDB yet.
+The backend now uses real ChromaDB for vector storage.
 
 Current file:
 
@@ -40,36 +40,44 @@ Current file:
 backend/app/services/vector_store.py
 ```
 
-Right now it uses:
+Embedding provider file:
 
-- Local hash-based embeddings.
-- A JSON file as the vector index.
+```text
+backend/app/services/embedding_provider.py
+```
+
+Right now the app uses:
+
+- ChromaDB persistent storage.
+- Provider-based embeddings.
+- `hash` embeddings by default.
+- Optional Ollama embeddings for better local semantic search.
 - The folder configured by `chroma_dir`, defaulting to:
 
 ```text
 backend/data/chroma
 ```
 
-So when a project is indexed, the app stores records like this:
+So when a project is indexed, the app stores each chunk in ChromaDB with:
 
 ```json
 {
   "id": "some/file.py:1",
+  "document": "chunk content...",
   "embedding": [0.0, 0.1, -0.2],
-  "chunk": {
+  "metadata": {
     "file_path": "some/file.py",
     "start_line": 1,
-    "end_line": 30,
-    "content": "..."
+    "end_line": 30
   }
 }
 ```
 
-This is good for an MVP because it is simple and works without extra services. But it is not the final production-style vector storage.
+The default `hash` embedding mode is good for an MVP because it works without extra services. For better meaning-based search, use Ollama embeddings locally or add a cloud embedding provider later.
 
 ## 3. Local JSON Index vs Actual ChromaDB
 
-### Current Local JSON Index
+### Previous Local JSON Index
 
 Pros:
 
@@ -84,7 +92,7 @@ Cons:
 - No advanced vector database features.
 - Embedding quality is basic because the current embedding function is hash-based.
 
-### Actual ChromaDB
+### Current Actual ChromaDB
 
 Pros:
 
@@ -99,23 +107,24 @@ Cons:
 - Adds a dependency.
 - Requires careful setup for local vs deployed environments.
 
-## 4. How To Shift From Local JSON To Actual ChromaDB
+## 4. How The Current ChromaDB Setup Works
 
-Use this as the migration plan.
+The migration from JSON to ChromaDB has already been done.
 
-### Step 1: Install ChromaDB
+### Runtime Dependency
 
-ChromaDB is already listed in the optional `agent` dependencies in:
+ChromaDB is now a normal backend dependency in:
 
 ```text
 backend/pyproject.toml
+backend/requirements.txt
 ```
 
-Install optional agent dependencies:
+Install backend dependencies:
 
 ```powershell
 cd backend
-uv sync --extra agent
+uv sync
 ```
 
 If using pip instead:
@@ -125,109 +134,134 @@ cd backend
 pip install chromadb
 ```
 
-### Step 2: Replace The JSON Storage
+### Chroma Client
 
-Update:
+The backend creates a persistent ChromaDB client in:
 
 ```text
 backend/app/services/vector_store.py
 ```
 
-Instead of writing JSON files, create a persistent Chroma client:
-
 ```python
-import chromadb
-
-from app.core.config import settings
-
-
-client = chromadb.PersistentClient(path=str(settings.chroma_dir))
+client = chromadb.PersistentClient(...)
 ```
 
-Then get one collection per project:
+### Project Collections
 
-```python
-def get_collection(project_id: str):
-    return client.get_or_create_collection(name=collection_name(project_id))
+The app creates one Chroma collection per project and embedding provider.
+
+For default hash embeddings:
+
+```text
+project_<project_id>
 ```
 
-### Step 3: Store Chunks In ChromaDB
+For Ollama embeddings:
 
-The current `upsert_chunks` function should change from:
-
-```python
-index_path(project_id).write_text(json.dumps(records), encoding="utf-8")
+```text
+project_<project_id>_ollama_<model_name>
 ```
 
-To something like:
+This matters because different embedding models can produce vectors with different dimensions. Keeping separate collections avoids ChromaDB dimension conflicts.
+
+### Store Chunks
 
 ```python
-collection = get_collection(project_id)
-
-collection.upsert(
-    ids=[f"{chunk['file_path']}:{chunk['start_line']}" for chunk in chunks],
-    embeddings=[embed_text(chunk["content"]) for chunk in chunks],
-    documents=[chunk["content"] for chunk in chunks],
-    metadatas=[
-        {
-            "file_path": chunk["file_path"],
-            "start_line": chunk["start_line"],
-            "end_line": chunk["end_line"],
-        }
-        for chunk in chunks
-    ],
-)
+await upsert_chunks(project_id, chunks)
 ```
 
-### Step 4: Search ChromaDB
+Internally, this stores:
 
-The current `search_chunks` function sorts JSON records manually.
+- ids
+- embeddings
+- documents
+- metadata
 
-With ChromaDB, use:
+### Search Chunks
 
 ```python
-collection = get_collection(project_id)
-results = collection.query(
-    query_embeddings=[embed_text(query)],
-    n_results=limit,
-)
+await search_chunks(project_id, query, limit=5)
 ```
 
-Then convert Chroma results back into the same chunk shape the rest of the app expects:
+This returns the same chunk shape the rest of the app already expects:
 
-```python
-chunks = []
-
-for document, metadata in zip(results["documents"][0], results["metadatas"][0]):
-    chunks.append(
-        {
-            "file_path": metadata["file_path"],
-            "start_line": metadata["start_line"],
-            "end_line": metadata["end_line"],
-            "content": document,
-        }
-    )
+```json
+{
+  "file_path": "some/file.py",
+  "start_line": 1,
+  "end_line": 30,
+  "content": "..."
+}
 ```
 
-### Step 5: Upgrade Embeddings Later
+## 5. Embedding Provider Setup
 
-The current `embed_text` function is useful for a free MVP, but real semantic search needs stronger embeddings.
+Embeddings are controlled by environment variables.
 
-Good future options:
+Default local MVP mode:
 
-- SentenceTransformers locally.
-- Ollama embeddings locally.
-- OpenAI/Gemini embeddings if using cloud APIs.
+```env
+EMBEDDING_PROVIDER=hash
+```
 
-Recommended learning path:
+Better local semantic mode:
 
-1. Keep current hash embeddings until the app flow is stable.
-2. Move storage from JSON to ChromaDB.
-3. Then upgrade embeddings.
+```env
+EMBEDDING_PROVIDER=ollama
+OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+```
 
-Do not change everything at once. Storage and embedding quality are separate concerns.
+Before using Ollama embeddings locally, install the model:
 
-## 5. Local Development Setup
+```powershell
+ollama pull nomic-embed-text
+```
+
+Then restart the backend and re-index projects.
+
+Important: if you change the embedding provider or embedding model, re-index the project. Old embeddings and new embeddings should not be mixed.
+
+## 6. Local vs Cloud Embeddings
+
+### Local Development
+
+Use:
+
+```env
+EMBEDDING_PROVIDER=hash
+```
+
+or:
+
+```env
+EMBEDDING_PROVIDER=ollama
+```
+
+`hash` is easiest. `ollama` gives better search but requires Ollama running on your machine.
+
+### Cloud Deployment
+
+On AWS or another cloud, you have three paths:
+
+1. Run Ollama on the same server as the backend.
+2. Use a cloud embedding API such as OpenAI, Gemini, or Cohere.
+3. Use a managed vector database later if scale grows.
+
+Recommended early cloud path:
+
+```text
+Frontend -> FastAPI backend -> cloud embedding API -> ChromaDB or managed vector DB
+```
+
+The code now has a provider layer, so adding cloud embeddings later should happen in:
+
+```text
+backend/app/services/embedding_provider.py
+```
+
+Do not put cloud API logic inside `vector_store.py`. Keep ChromaDB storage and embedding generation separate.
+
+## 7. Local Development Setup
 
 Start MongoDB:
 
@@ -291,6 +325,8 @@ MONGODB_URI=mongodb://localhost:27017
 MONGODB_DB=repomind
 REPOS_DIR=./data/repos
 CHROMA_DIR=./data/chroma
+EMBEDDING_PROVIDER=hash
+OLLAMA_EMBEDDING_MODEL=nomic-embed-text
 LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.1:8b
@@ -298,7 +334,7 @@ GROQ_API_KEY=
 GEMINI_API_KEY=
 ```
 
-## 7. GitHub Connection
+## 8. GitHub Connection
 
 This project already has a Git remote configured:
 
@@ -348,7 +384,7 @@ Then push that branch:
 git push origin YOUR_BRANCH_NAME
 ```
 
-## 8. Local To Actual Deployment Path
+## 9. Local To Actual Deployment Path
 
 Here is the clean path from local MVP to real hosted app.
 
@@ -357,21 +393,22 @@ Here is the clean path from local MVP to real hosted app.
 - MongoDB runs using Docker.
 - Backend runs with FastAPI locally.
 - Frontend runs with Next.js locally.
-- Vector index uses local JSON files.
+- Vector index uses ChromaDB.
+- Embeddings use `hash` by default.
 - LLM uses Ollama, Groq, or Gemini.
 
-### Phase 2: Real ChromaDB Locally
+### Phase 2: Better Local Embeddings
 
-- Replace JSON vector index with ChromaDB persistent client.
-- Keep Chroma data in `backend/data/chroma`.
-- Keep the same backend API shape.
-- Test indexing and chat again.
+- Set `EMBEDDING_PROVIDER=ollama`.
+- Pull `nomic-embed-text`.
+- Restart backend.
+- Re-index projects.
 
-### Phase 3: Better Embeddings
+### Phase 3: Cloud-Friendly Embeddings
 
-- Replace hash embeddings with a real embedding model.
-- Re-index projects after changing the embedding model.
-- Keep old indexes separate or delete/rebuild them.
+- Add a cloud embedding provider in `embedding_provider.py`.
+- Keep ChromaDB logic unchanged.
+- Use environment variables to switch provider.
 
 ### Phase 4: Hosted Backend And Frontend
 
@@ -400,7 +437,7 @@ Before real users:
 - Protect API keys.
 - Avoid sending secrets or ignored files to the LLM.
 
-## 9. Simple Mental Model
+## 10. Simple Mental Model
 
 Think of RepoMind AI like this:
 
@@ -414,9 +451,12 @@ GitHub repo
    -> LLM answer
 ```
 
-Right now the vector store is JSON.
+Now the vector store is ChromaDB.
 
-Later the vector store becomes ChromaDB.
+Embeddings are provider-based:
+
+```text
+hash now -> Ollama locally -> cloud provider later
+```
 
 The rest of the app should not need to care too much as long as `upsert_chunks` and `search_chunks` keep returning the same kind of data.
-

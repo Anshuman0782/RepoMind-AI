@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     mongodb_db: str = "repomind"
     repos_dir: Path = Path("./data/repos")
     chroma_dir: Path = Path("./data/chroma")
+    embedding_provider: str = "hash"
+    ollama_embedding_model: str = "nomic-embed-text"
     llm_provider: str = "ollama"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.1:8b"
@@ -24,4 +26,3 @@ class Settings(BaseSettings):
 settings = Settings()
 settings.repos_dir.mkdir(parents=True, exist_ok=True)
 settings.chroma_dir.mkdir(parents=True, exist_ok=True)
-

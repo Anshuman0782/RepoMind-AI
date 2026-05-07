@@ -10,7 +10,7 @@ It lets a user import a GitHub repo or upload project files, index the codebase,
 - Backend: FastAPI, Python
 - App database: MongoDB
 - Vector index: ChromaDB persistent local vector database
-- Embeddings: built-in local hash embeddings for MVP, SentenceTransformers later
+- Embeddings: provider-based embeddings, with local hash by default and Ollama optional
 - LLM providers: Groq, Gemini, or Ollama
 - Agent workflow: LangGraph in phase 2
 
