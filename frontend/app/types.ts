@@ -8,4 +8,6 @@ export type ChatMessage = {
   answer: string;
   sources: ChatResponse["sources"];
   createdAt: string;
+  routedAgent?: string | null;
+  actionChangeSetId?: string;
 };

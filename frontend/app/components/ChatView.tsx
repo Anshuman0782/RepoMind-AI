@@ -1,9 +1,9 @@
 "use client";
 
 import { FormEvent, RefObject } from "react";
-import { Send } from "lucide-react";
-import { Project } from "@/lib/api";
-import { ChatMessage } from "../types";
+import { Check, ExternalLink, Send, X } from "lucide-react";
+import { CommitAssistantPreview, CreatedCommit, EditChangeSet, Project } from "@/lib/api";
+import { ChatMessage, WorkspaceMode } from "../types";
 import { AnswerContent } from "./AnswerContent";
 
 type ChatViewProps = {
@@ -16,9 +16,19 @@ type ChatViewProps = {
   message: string;
   busy: boolean;
   isLoadingMessages: boolean;
+  activeEditChangeSet: EditChangeSet | null;
+  plannerChangeSetId: string;
+  commitPreview: CommitAssistantPreview | null;
+  createdCommit: CreatedCommit | null;
   messagesEndRef: RefObject<HTMLDivElement | null>;
   setMessage: (value: string) => void;
+  setWorkspaceMode: (mode: WorkspaceMode) => void;
   onChat: (event: FormEvent<HTMLFormElement>) => void;
+  onApproveEdit: () => void;
+  onRejectEdit: () => void;
+  onApproveReview: () => void;
+  onSkipReview: () => void;
+  onCreateCommit: () => void;
 };
 
 export function ChatView({
@@ -31,9 +41,19 @@ export function ChatView({
   message,
   busy,
   isLoadingMessages,
+  activeEditChangeSet,
+  plannerChangeSetId,
+  commitPreview,
+  createdCommit,
   messagesEndRef,
   setMessage,
+  setWorkspaceMode,
   onChat,
+  onApproveEdit,
+  onRejectEdit,
+  onApproveReview,
+  onSkipReview,
+  onCreateCommit,
 }: ChatViewProps) {
   return (
     <>
@@ -62,6 +82,23 @@ export function ChatView({
                     ) : null}
                   </div>
                   <AnswerContent answer={item.answer} />
+
+                  {item.actionChangeSetId && activeEditChangeSet?.id === item.actionChangeSetId ? (
+                    <AgentActionPanel
+                      changeSet={activeEditChangeSet}
+                      isPlannerChangeSet={plannerChangeSetId === item.actionChangeSetId}
+                      busy={busy}
+                      pendingAction={pendingAction}
+                      onApproveEdit={onApproveEdit}
+                      onRejectEdit={onRejectEdit}
+                      onApproveReview={onApproveReview}
+                      onSkipReview={onSkipReview}
+                      commitPreview={commitPreview}
+                      createdCommit={createdCommit}
+                      onCreateCommit={onCreateCommit}
+                      onOpenPlanner={() => setWorkspaceMode("planner")}
+                    />
+                  ) : null}
 
                   {item.sources.length > 0 ? (
                     <details className="mt-4 rounded-md border border-line bg-panel">
@@ -152,5 +189,154 @@ export function ChatView({
         </button>
       </form>
     </>
+  );
+}
+
+type AgentActionPanelProps = {
+  changeSet: EditChangeSet;
+  isPlannerChangeSet: boolean;
+  busy: boolean;
+  pendingAction: string;
+  onApproveEdit: () => void;
+  onRejectEdit: () => void;
+  onApproveReview: () => void;
+  onSkipReview: () => void;
+  commitPreview: CommitAssistantPreview | null;
+  createdCommit: CreatedCommit | null;
+  onCreateCommit: () => void;
+  onOpenPlanner: () => void;
+};
+
+function AgentActionPanel({
+  changeSet,
+  isPlannerChangeSet,
+  busy,
+  pendingAction,
+  onApproveEdit,
+  onRejectEdit,
+  onApproveReview,
+  onSkipReview,
+  commitPreview,
+  createdCommit,
+  onCreateCommit,
+  onOpenPlanner,
+}: AgentActionPanelProps) {
+  return (
+    <div className="mt-4 rounded-md border border-accent/30 bg-accent/5 p-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-ink">Agent action ready</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-600">
+            Review this diff here, approve it from chat, or open Planner for the larger workspace.
+          </p>
+        </div>
+        <span className="rounded bg-white px-2 py-1 text-xs font-medium uppercase text-zinc-600">
+          {changeSet.status.replace("_", " ")}
+        </span>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {changeSet.files.map((file) => (
+          <span key={file} className="rounded bg-white px-2 py-1 text-xs text-zinc-700">
+            {file}
+          </span>
+        ))}
+      </div>
+
+      <details className="mt-3 rounded-md border border-line bg-white">
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-zinc-700">View diff</summary>
+        <pre className="max-h-80 overflow-auto border-t border-line bg-zinc-950 p-3 text-xs leading-5 text-zinc-100">
+          <code>{changeSet.diff || "No diff available."}</code>
+        </pre>
+      </details>
+
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+        <button
+          type="button"
+          className="inline-flex items-center justify-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-panel disabled:opacity-60"
+          onClick={onOpenPlanner}
+          disabled={busy}
+        >
+          <ExternalLink size={16} />
+          Open Planner
+        </button>
+
+        {changeSet.status === "pending" ? (
+          <>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+              onClick={onApproveEdit}
+              disabled={busy || !isPlannerChangeSet}
+            >
+              <Check size={16} />
+              {pendingAction === "planner-automation" ? "Applying..." : "Approve edit"}
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-panel disabled:opacity-60"
+              onClick={onRejectEdit}
+              disabled={busy}
+            >
+              <X size={16} />
+              {pendingAction === "edit-reject" ? "Rejecting..." : "Reject"}
+            </button>
+          </>
+        ) : null}
+
+        {changeSet.status === "applied" ? (
+          <>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+              onClick={onApproveReview}
+              disabled={busy || !isPlannerChangeSet}
+            >
+              <Check size={16} />
+              {pendingAction === "planner-review" ? "Reviewing..." : "Approve Review Agent"}
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-line bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-panel disabled:opacity-60"
+              onClick={onSkipReview}
+              disabled={busy}
+            >
+              Skip review
+            </button>
+          </>
+        ) : null}
+      </div>
+
+      {changeSet.status === "applied" && commitPreview?.has_changes ? (
+        <div className="mt-3 rounded-md border border-line bg-white p-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-ink">Commit Assistant draft</p>
+              <p className="mt-1 text-xs leading-5 text-zinc-600">
+                Review or edit the full commit and PR text in Planner. You can approve the commit from here.
+              </p>
+            </div>
+            {createdCommit ? (
+              <span className="rounded bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                pushed {createdCommit.commit_hash.slice(0, 8)}
+              </span>
+            ) : null}
+          </div>
+          <div className="mt-3 rounded bg-panel p-2 font-mono text-xs leading-5 text-zinc-700">
+            {commitPreview.commit_message || "No commit message drafted."}
+          </div>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              className="rounded-md bg-ink px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+              onClick={onCreateCommit}
+              disabled={busy || Boolean(createdCommit) || !commitPreview.commit_message.trim()}
+            >
+              {pendingAction === "create-commit" ? "Pushing..." : createdCommit ? "Pushed" : "Approve commit and push"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }

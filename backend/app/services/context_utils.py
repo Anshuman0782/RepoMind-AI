@@ -5,7 +5,7 @@ from app.services.codebase_tools import read_file
 
 def mentioned_file_paths(message: str, limit: int = 3) -> list[str]:
     candidates = re.findall(
-        r"(?:`([^`]+\.[A-Za-z0-9]+)`|(?:file|path|module)\s*[:=]?\s*([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)|\b([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)\b)",
+        r"(?:`([^`]+\.[A-Za-z0-9+]+)`|(?:file|path|module)\s*[:=]?\s*([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)|(?<![A-Za-z0-9_./\\+-])([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)(?![A-Za-z0-9_./\\+-]))",
         message,
         flags=re.IGNORECASE,
     )

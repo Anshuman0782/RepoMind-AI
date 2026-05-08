@@ -151,9 +151,9 @@ def _requested_file_action(message: str) -> str | None:
 
 def _requested_file_path(message: str) -> str | None:
     patterns = [
-        r"(?:path|file path|filepath)\s*[:=]\s*`?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)`?",
-        r"(?:create|add|new|edit|update|replace|modify|delete|remove)\s+(?:a\s+|the\s+)?(?:file\s+)?`?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)`?",
-        r"(?:file|called|named)\s+`?([A-Za-z0-9_./\\-]+\.[A-Za-z0-9]+)`?",
+        r"(?:path|file path|filepath)\s*[:=]\s*`?([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)`?",
+        r"(?:create|add|new|edit|update|replace|modify|delete|remove)\s+(?:a\s+|the\s+)?(?:file\s+)?`?([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)`?",
+        r"(?:file|called|named)\s+`?([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)`?",
     ]
     for pattern in patterns:
         match = re.search(pattern, message, flags=re.IGNORECASE)
@@ -163,7 +163,7 @@ def _requested_file_path(message: str) -> str | None:
 
 
 def _requested_file_content(message: str) -> str | None:
-    fenced = re.search(r"```[a-zA-Z0-9_-]*\n?([\s\S]*?)```", message)
+    fenced = re.search(r"```[a-zA-Z0-9_+#.-]*\n?([\s\S]*?)```", message)
     if fenced:
         return fenced.group(1).rstrip("\n")
 

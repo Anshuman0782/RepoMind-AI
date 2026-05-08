@@ -55,6 +55,67 @@ def to_chat_session_response(chat: dict) -> ChatSessionResponse:
     )
 
 
+def route_chat_agent(message: str) -> str:
+    lowered = message.lower()
+    if is_documentation_request(message):
+        if is_readme_file_request(message):
+            return "readme_editor"
+        return "documentation"
+    if any(term in lowered for term in ("review diff", "review changes", "review current", "code review")):
+        return "review"
+    if any(term in lowered for term in ("commit", "pull request", "pr description", "pr title")):
+        return "commit"
+    if any(term in lowered for term in ("fix", "create", "edit", "delete", "remove", "update", "refactor", "change file")):
+        return "planner"
+    if any(term in lowered for term in ("bug", "error", "not working", "broken", "fails", "failed", "does nothing")):
+        return "bug_investigation"
+    if lowered.startswith("where ") or any(term in lowered for term in ("where is", "where are", "find area", "handled", "implemented")):
+        return "navigator"
+    return "chat"
+
+
+def routed_answer(agent: str, answer: str) -> str:
+    labels = {
+        "planner": "Planner Agent",
+        "readme_editor": "Documentation Agent",
+        "documentation": "Documentation Agent",
+        "bug_investigation": "Bug Investigation Agent",
+        "navigator": "Navigator Agent",
+        "review": "Review Agent",
+        "commit": "Commit Assistant",
+    }
+    label = labels.get(agent)
+    if not label:
+        return answer
+    if agent in {"planner", "readme_editor"}:
+        reason = "this looks like a file change request"
+        safety = "No files will change until you approve the edit preview."
+    elif agent == "review":
+        reason = "you asked to inspect the current changes"
+        safety = "Tests are suggested only; nothing is run automatically."
+    elif agent == "commit":
+        reason = "you asked for commit or pull request help"
+        safety = "Use the Commit workspace to approve the actual commit and push."
+    else:
+        reason = "this needs a specialized codebase investigation"
+        safety = "The result is saved here with source references."
+    return f"**Routed to {label}**\nRepoMind routed this to {label} because {reason}. {safety}\n\n{answer}"
+
+
+def workspace_for_agent(agent: str) -> str | None:
+    if agent in {"planner", "readme_editor"}:
+        return "planner"
+    if agent in {"bug_investigation", "navigator"}:
+        return "navigator"
+    if agent == "review":
+        return "review"
+    if agent == "commit":
+        return "commit"
+    if agent == "documentation":
+        return "chat"
+    return None
+
+
 async def create_chat_session(project_id: str, title: str | None = None) -> dict:
     project = await db.projects.find_one({"_id": project_id})
     if not project:
@@ -146,16 +207,52 @@ async def chat(payload: ChatRequest) -> ChatResponse:
     if not chat_session:
         raise HTTPException(status_code=404, detail="Chat not found")
 
-    chunks = await search_chunks(payload.project_id, payload.message)
-    chunks = await _augment_chat_context(payload.project_id, payload.message, chunks)
-    answer = direct_chat_answer(payload.message, chunks)
-    if answer is None:
-        try:
-            answer = await generate_answer(payload.message, chunks)
-        except LLMProviderError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+    routed_agent = route_chat_agent(payload.message)
+    proposed_operations = None
 
-    sources = [SourceChunk(**chunk) for chunk in chunks]
+    if routed_agent == "readme_editor":
+        answer, sources, proposed_operations = await generate_readme_file_change(
+            payload.project_id,
+            payload.message,
+        )
+        answer = routed_answer(routed_agent, answer)
+    elif routed_agent == "documentation":
+        answer, sources = await generate_documentation(payload.project_id, payload.message)
+        answer = routed_answer(routed_agent, answer)
+    elif routed_agent == "planner":
+        answer, sources, proposed_operations = await plan_change(
+            payload.project_id,
+            payload.message,
+        )
+        answer = routed_answer(routed_agent, answer)
+    elif routed_agent in {"bug_investigation", "navigator"}:
+        mode = "bug" if routed_agent == "bug_investigation" else "navigator"
+        answer, sources = await investigate_codebase(payload.project_id, payload.message, mode)
+        answer = routed_answer(routed_agent, answer)
+    elif routed_agent == "review":
+        try:
+            answer, sources = await review_changes(payload.project_id, payload.message)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        answer = routed_answer(routed_agent, answer)
+    elif routed_agent == "commit":
+        sources = []
+        answer = routed_answer(
+            routed_agent,
+            "I can help draft commit and PR copy from the current diff. Open the Commit workspace, or ask for a code review first if you want one more check before committing.",
+        )
+    else:
+        chunks = await search_chunks(payload.project_id, payload.message)
+        chunks = await _augment_chat_context(payload.project_id, payload.message, chunks)
+        answer = direct_chat_answer(payload.message, chunks)
+        if answer is None:
+            try:
+                answer = await generate_answer(payload.message, chunks)
+            except LLMProviderError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        sources = [SourceChunk(**chunk) for chunk in chunks]
+
     now = utc_now()
     await db.chat_messages.insert_one(
         {
@@ -176,7 +273,15 @@ async def chat(payload: ChatRequest) -> ChatResponse:
         update_fields["title"] = title_from_question(payload.message)
     await db.chats.update_one({"_id": payload.chat_id}, {"$set": update_fields})
 
-    return ChatResponse(answer=answer, sources=sources)
+    agent_status = "approval_required" if proposed_operations else "completed"
+    return ChatResponse(
+        answer=answer,
+        sources=sources,
+        proposed_operations=proposed_operations,
+        routed_agent=routed_agent if routed_agent != "chat" else None,
+        agent_status=agent_status if routed_agent != "chat" else None,
+        suggested_workspace_mode=workspace_for_agent(routed_agent),
+    )
 
 
 async def _augment_chat_context(project_id: str, message: str, chunks: list[dict]) -> list[dict]:

@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from app.core.database import db
-from app.services.file_scanner import IGNORED_DIRS, IGNORED_FILES, TEXT_EXTENSIONS
+from app.services.file_scanner import IGNORED_DIRS, IGNORED_FILES, is_text_file_path
 from app.services.repo_service import get_project_path
 
 
@@ -37,7 +37,7 @@ def _resolve_edit_path(root: Path, requested_path: str) -> Path:
         raise ValueError("File path is ignored")
     if file_path.name in IGNORED_FILES:
         raise ValueError("File path is ignored")
-    if file_path.suffix.lower() not in TEXT_EXTENSIONS:
+    if not is_text_file_path(file_path):
         raise ValueError("Only text code files can be edited")
 
     return file_path

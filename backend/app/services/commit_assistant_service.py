@@ -5,7 +5,7 @@ from pathlib import Path
 from git import Repo
 from git.exc import GitCommandError
 
-from app.services.file_scanner import IGNORED_DIRS, IGNORED_FILES, TEXT_EXTENSIONS
+from app.services.file_scanner import IGNORED_DIRS, IGNORED_FILES, is_text_file_path
 from app.services.llm_provider import LLMProviderError, generate_answer
 from app.services.repo_service import get_project_path
 
@@ -169,7 +169,7 @@ def _is_readable_code_path(root: Path, requested_path: str) -> bool:
     return (
         not any(part in IGNORED_DIRS for part in relative_parts)
         and file_path.name not in IGNORED_FILES
-        and file_path.suffix.lower() in TEXT_EXTENSIONS
+        and is_text_file_path(file_path)
     )
 
 

@@ -135,6 +135,9 @@ class ChatResponse(BaseModel):
     answer: str
     sources: list[SourceChunk]
     proposed_operations: list[FileEditOperation] | None = None
+    routed_agent: str | None = None
+    agent_status: str | None = None
+    suggested_workspace_mode: str | None = None
 
 
 class ChatMessageResponse(BaseModel):

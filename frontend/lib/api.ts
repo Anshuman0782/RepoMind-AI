@@ -24,6 +24,9 @@ export type ChatResponse = {
     content: string;
   }[];
   proposed_operations?: FileEditOperation[] | null;
+  routed_agent?: string | null;
+  agent_status?: string | null;
+  suggested_workspace_mode?: string | null;
 };
 
 export type ChatMessageResponse = ChatResponse & {

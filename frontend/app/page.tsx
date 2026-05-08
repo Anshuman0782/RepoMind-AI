@@ -1058,6 +1058,27 @@ export default function Home() {
 
       const hadMessages = (messagesByChat[activeChatId] ?? []).length > 0;
       const response = await sendMessage(selectedProjectId, activeChatId, submittedQuestion);
+      let actionChangeSetId = "";
+      if (response.proposed_operations?.length) {
+        try {
+          const changeSet = await createEditChangeSet(selectedProjectId, response.proposed_operations);
+          setActiveEditChangeSet(changeSet);
+          setPlannerChangeSetId(changeSet.id);
+          setPlannerAutomationPrompt(submittedQuestion);
+          setPlannerAutomationChatId(activeChatId);
+          setPlannerAutomationStatus("Editor Agent prepared a diff preview. You can approve it here in Chat or open Planner for the larger workspace.");
+          setCommitContext(submittedQuestion);
+          setCommitPreview(null);
+          setCreatedCommit(null);
+          const firstOperation = response.proposed_operations[0];
+          setEditAction(firstOperation.action);
+          setEditFilePath(firstOperation.path);
+          setEditContent(firstOperation.content ?? "");
+          actionChangeSetId = changeSet.id;
+        } catch (previewError) {
+          setError(previewError instanceof Error ? previewError.message : "Agent could not prepare an edit preview");
+        }
+      }
       const chatMessage: ChatMessage = {
         id: crypto.randomUUID(),
         question: submittedQuestion,
@@ -1067,6 +1088,8 @@ export default function Home() {
           hour: "2-digit",
           minute: "2-digit",
         }),
+        routedAgent: response.routed_agent,
+        actionChangeSetId: actionChangeSetId || undefined,
       };
       setMessagesByChat((current) => ({
         ...current,
@@ -1177,9 +1200,28 @@ export default function Home() {
               message={message}
               busy={busy}
               isLoadingMessages={isLoadingMessages}
+              activeEditChangeSet={activeEditChangeSet}
+              plannerChangeSetId={plannerChangeSetId}
+              commitPreview={commitPreview}
+              createdCommit={createdCommit}
               messagesEndRef={messagesEndRef}
               setMessage={setMessage}
+              setWorkspaceMode={setWorkspaceMode}
               onChat={handleChat}
+              onApproveEdit={handleApprovePlannerAutomation}
+              onRejectEdit={handleRejectEditChangeSet}
+              onApproveReview={handleApprovePlannerReview}
+              onCreateCommit={handleCreateCommit}
+              onSkipReview={() => {
+                setPlannerChangeSetId("");
+                setPlannerAutomationPrompt("");
+                setPlannerAutomationChatId("");
+                setPlannerAutomationStatus("");
+                setCommitPreview(null);
+                setCreatedCommit(null);
+                setReviewSuggestionFiles([]);
+                setReviewSuggestionChangeSetId("");
+              }}
             />
           ) : workspaceMode === "files" ? (
             <FilesView
