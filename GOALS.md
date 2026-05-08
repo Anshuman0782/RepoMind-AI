@@ -123,6 +123,7 @@ Planned work:
 
 - [x] Generate architecture summaries.
 - [x] Generate README improvements.
+- [x] Generate or update `README.md` as an approval-gated edit preview when the user asks for a README file change.
 - [x] Generate API docs and setup notes.
 - [x] Generate onboarding guides.
 - [x] Route documentation requests through Planner as an automated Documentation Agent handoff.

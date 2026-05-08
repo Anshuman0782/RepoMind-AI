@@ -18,7 +18,12 @@ from app.models.schemas import (
 )
 from app.services.chat_answer_service import direct_chat_answer
 from app.services.context_utils import full_file_chunks_for_message, merge_context_chunks
-from app.services.documentation_service import generate_documentation, is_documentation_request
+from app.services.documentation_service import (
+    generate_documentation,
+    generate_readme_file_change,
+    is_documentation_request,
+    is_readme_file_request,
+)
 from app.services.investigation_service import investigate_codebase
 from app.services.llm_provider import LLMProviderError, generate_answer
 from app.services.planner_service import plan_change
@@ -226,8 +231,14 @@ async def create_change_plan(payload: ChangePlanRequest) -> ChatResponse:
         raise HTTPException(status_code=404, detail="Chat not found")
 
     if is_documentation_request(payload.message):
-        answer, sources = await generate_documentation(payload.project_id, payload.message)
-        proposed_operations = None
+        if is_readme_file_request(payload.message):
+            answer, sources, proposed_operations = await generate_readme_file_change(
+                payload.project_id,
+                payload.message,
+            )
+        else:
+            answer, sources = await generate_documentation(payload.project_id, payload.message)
+            proposed_operations = None
         question = f"Documentation agent: {payload.message}"
     else:
         answer, sources, proposed_operations = await plan_change(payload.project_id, payload.message)
