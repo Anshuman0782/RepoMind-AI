@@ -1,6 +1,6 @@
 # RepoMind AI Agent Test Cases
 
-Use these tests before moving to Goal 10. Run them from the UI against the imported sample project that contains `index.html`.
+Use these tests before moving to the next goal. Run them from the UI against the imported sample project that contains `index.html`.
 
 The current `index.html` bug is the baseline:
 
@@ -287,13 +287,136 @@ Send me:
 - The delete diff preview.
 - Whether separate review approval appeared.
 
+## Test 12: Chat Routes To Planner With Inline Approval
+
+Tab: Chat
+
+Prompt:
+
+```text
+Fix the Change Color button bug in index.html.
+```
+
+Expected:
+
+- Chat says RepoMind routed the request to Planner Agent.
+- Chat shows a plan or file-change explanation.
+- If a concrete edit preview can be prepared, the Chat response shows:
+  - `View diff`
+  - `Approve edit`
+  - `Reject`
+- No file changes before approval.
+- Planner tab mirrors the same change set if opened.
+
+Send me:
+
+- Whether the Chat action panel appeared.
+- Whether the diff matched the intended file.
+
+## Test 13: Natural Create File From Chat
+
+Tab: Chat
+
+Prompt:
+
+```text
+create calculator.c++
+```
+
+Expected:
+
+- Chat routes to Planner Agent.
+- Planner generates conservative starter C++ content automatically.
+- Chat shows an approval-gated diff preview for `calculator.c++`.
+- No rigid `path:` or `content:` syntax is required.
+- `calculator.c++` is not created until `Approve edit`.
+
+Send me:
+
+- The first few diff lines.
+- Whether the file was created only after approval.
+
+## Test 14: Natural Delete File From Chat
+
+Prerequisite: `calculator.c++` exists from Test 13.
+
+Tab: Chat
+
+Prompt:
+
+```text
+remove calculator.c++
+```
+
+Expected:
+
+- Chat routes to Planner Agent.
+- Chat shows an approval-gated delete diff for `calculator.c++`.
+- The file is not deleted until `Approve edit`.
+- After approval, Chat offers separate Review Agent approval.
+
+Send me:
+
+- Whether the delete diff appeared.
+- Whether the file was deleted only after approval.
+
+## Test 15: Edit Request Redirects To Editor
+
+Tab: Chat
+
+Prompt:
+
+```text
+edit index.html and change the title
+```
+
+Expected:
+
+- Chat routes to Planner Agent.
+- Chat does not guess and apply a full-file edit.
+- Chat shows `Editor handoff ready`.
+- Clicking `Open Editor` opens the Editor tab.
+- Editor action is `edit` and file path is prefilled as `index.html`.
+- User can load current file, edit manually, preview diff, and approve.
+
+Send me:
+
+- Whether the Editor handoff appeared.
+- Whether Editor opened with the expected action/path.
+
+## Test 16: README File Generation From Chat
+
+Tab: Chat
+
+Prompt:
+
+```text
+Generate README improvements
+```
+
+Expected:
+
+- Chat routes to Documentation Agent.
+- Chat prepares an approval-gated `README.md` edit preview.
+- The README is created or updated only after `Approve edit`.
+- Commit Assistant draft appears after the edit is applied.
+
+Send me:
+
+- Whether the README diff appeared in Chat.
+- Whether commit draft appeared after approval.
+
 ## Pass Criteria
 
 - Chat answers with source references.
+- Chat routes specialist requests to the right agent.
+- Chat shows inline edit approval when an agent prepares a change set.
 - Navigator finds relevant files and evidence.
 - Planner creates plans and does not edit broad requests without approval.
-- Concrete create/delete requests create a diff preview.
+- Concrete and natural create/delete requests create a diff preview.
+- Natural edit requests redirect to Editor instead of guessing risky full-file edits.
 - Editor applies only after approval.
 - Review Agent does not run until separately approved.
-- Documentation Agent handles docs/explain requests from Planner.
+- Documentation Agent handles docs/explain requests from Planner and Chat.
+- README file generation creates approval-gated `README.md` changes.
 - All results are saved into the active chat.

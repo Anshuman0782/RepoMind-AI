@@ -144,8 +144,35 @@ Planned work:
 - [x] Generate PR title and description.
 - Add branch and pull request creation later.
 
+## Completed Goal 11: Chat Command Center And Agent Routing
+
+Make Chat the main place users can ask for work without knowing which specialist tab to use.
+
+Planned work:
+
+- [x] Route Chat requests to the right specialist agent:
+  - normal repo Q&A
+  - Documentation Agent
+  - README file generation
+  - Navigator Agent
+  - Bug Investigation Agent
+  - Planner Agent
+  - Review Agent
+  - Commit Assistant guidance
+- [x] Show routed-agent context in Chat so users understand what happened.
+- [x] Show approval-gated edit previews directly in Chat when Planner prepares a change set.
+- [x] Let users approve/reject edits from Chat without switching tabs.
+- [x] Ask for separate Review Agent approval after an edit is applied.
+- [x] Show Commit Assistant draft and commit approval from the Chat action panel.
+- [x] Keep Planner, Editor, Review, and Commit tabs as deeper workspaces and fallbacks.
+- [x] Support natural create/delete prompts without requiring a rigid "create file path ... content ..." pattern.
+- [x] Generate conservative starter content for natural create-file requests when the user does not provide content.
+- [x] Redirect natural edit-file requests to Editor with the action/path prefilled, because full-file edits need safer manual control.
+- [x] Expand editable text/source file support across scanner, editor, review, and commit assistant while still blocking binary files.
+
 ## Future Ideas
 
+- Branch creation and GitHub pull request creation.
 - Dependency upgrade agent.
 - Architecture map visualization.
 - Security review mode.

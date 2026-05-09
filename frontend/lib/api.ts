@@ -27,6 +27,8 @@ export type ChatResponse = {
   routed_agent?: string | null;
   agent_status?: string | null;
   suggested_workspace_mode?: string | null;
+  suggested_action?: string | null;
+  suggested_path?: string | null;
 };
 
 export type ChatMessageResponse = ChatResponse & {

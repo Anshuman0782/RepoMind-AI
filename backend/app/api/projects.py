@@ -1,7 +1,7 @@
 import shutil
 from pathlib import Path
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, HTTPException
 
 from app.core.config import settings
 from app.core.database import db
@@ -27,7 +27,7 @@ from app.services.editing_tools import (
     reject_edit_change_set,
     rollback_edit_change_set,
 )
-from app.services.repo_service import create_project, reindex_project
+from app.services.repo_service import create_project, import_project, reindex_project
 from app.services.vector_store import delete_collection
 
 
@@ -35,11 +35,16 @@ router = APIRouter()
 
 
 @router.post("", response_model=ProjectResponse)
-async def create_project_endpoint(payload: CreateProjectRequest) -> ProjectResponse:
+async def create_project_endpoint(
+    payload: CreateProjectRequest,
+    background_tasks: BackgroundTasks,
+) -> ProjectResponse:
     try:
         project = await create_project(payload.name, str(payload.repo_url))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    background_tasks.add_task(import_project, project["_id"])
 
     return ProjectResponse(
         id=project["_id"],

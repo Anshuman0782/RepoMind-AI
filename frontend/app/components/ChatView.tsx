@@ -100,6 +100,25 @@ export function ChatView({
                     />
                   ) : null}
 
+                  {!item.actionChangeSetId &&
+                  item.agentStatus === "redirect_required" &&
+                  item.suggestedWorkspaceMode === "editor" ? (
+                    <EditorRedirectPanel
+                      path={item.suggestedPath}
+                      busy={busy}
+                      onOpenEditor={() => setWorkspaceMode("editor")}
+                    />
+                  ) : null}
+
+                  {!item.actionChangeSetId &&
+                  item.agentStatus === "redirect_required" &&
+                  item.suggestedWorkspaceMode === "architecture" ? (
+                    <ArchitectureRedirectPanel
+                      busy={busy}
+                      onOpenArchitecture={() => setWorkspaceMode("architecture")}
+                    />
+                  ) : null}
+
                   {item.sources.length > 0 ? (
                     <details className="mt-4 rounded-md border border-line bg-panel">
                       <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-zinc-700">
@@ -189,6 +208,67 @@ export function ChatView({
         </button>
       </form>
     </>
+  );
+}
+
+type ArchitectureRedirectPanelProps = {
+  busy: boolean;
+  onOpenArchitecture: () => void;
+};
+
+function ArchitectureRedirectPanel({ busy, onOpenArchitecture }: ArchitectureRedirectPanelProps) {
+  return (
+    <div className="mt-4 rounded-md border border-accent/30 bg-accent/5 p-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-ink">Architecture map ready</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-600">
+            Open the interactive Architecture workspace to inspect the repository layers and file groups.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex items-center justify-center gap-2 rounded-md bg-ink px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+          onClick={onOpenArchitecture}
+          disabled={busy}
+        >
+          <ExternalLink size={16} />
+          Open Architecture
+        </button>
+      </div>
+    </div>
+  );
+}
+
+type EditorRedirectPanelProps = {
+  path?: string | null;
+  busy: boolean;
+  onOpenEditor: () => void;
+};
+
+function EditorRedirectPanel({ path, busy, onOpenEditor }: EditorRedirectPanelProps) {
+  return (
+    <div className="mt-4 rounded-md border border-line bg-panel p-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-ink">Editor handoff ready</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-600">
+            {path
+              ? `Open Editor with ${path} selected, load the current file, then preview and approve the diff.`
+              : "Open Editor, choose the file, then preview and approve the diff."}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex items-center justify-center gap-2 rounded-md bg-ink px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+          onClick={onOpenEditor}
+          disabled={busy}
+        >
+          <ExternalLink size={16} />
+          Open Editor
+        </button>
+      </div>
+    </div>
   );
 }
 

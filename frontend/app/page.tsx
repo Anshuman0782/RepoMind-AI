@@ -37,6 +37,7 @@ import {
 } from "@/lib/api";
 
 import { ChatView } from "./components/ChatView";
+import { ArchitectureView } from "./components/ArchitectureView";
 import { CommitView } from "./components/CommitView";
 import { EditorView } from "./components/EditorView";
 import { FilesView } from "./components/FilesView";
@@ -201,6 +202,35 @@ export default function Home() {
         setLoadingFilesProjectId("");
       });
   }, [filesByProject, selectedProjectId]);
+
+  useEffect(() => {
+    if (!selectedProjectId || !selectedProject) {
+      return;
+    }
+    if (selectedProject.status !== "importing" && selectedProject.status !== "indexing") {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      listProjects()
+        .then((items) => {
+          const updatedProject = items.find((project) => project.id === selectedProjectId);
+          setProjects(items);
+          if (updatedProject && updatedProject.status !== selectedProject.status) {
+            setFilesByProject((current) => {
+              const next = { ...current };
+              delete next[selectedProjectId];
+              return next;
+            });
+          }
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : "Failed to refresh project status");
+        });
+    }, 2500);
+
+    return () => window.clearInterval(timer);
+  }, [selectedProject?.status, selectedProjectId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1078,6 +1108,14 @@ export default function Home() {
         } catch (previewError) {
           setError(previewError instanceof Error ? previewError.message : "Agent could not prepare an edit preview");
         }
+      } else if (
+        response.agent_status === "redirect_required" &&
+        response.suggested_workspace_mode === "editor"
+      ) {
+        setEditAction((response.suggested_action as FileEditOperation["action"]) || "edit");
+        setEditFilePath(response.suggested_path || "");
+        setEditContent("");
+        setActiveEditChangeSet(null);
       }
       const chatMessage: ChatMessage = {
         id: crypto.randomUUID(),
@@ -1089,8 +1127,15 @@ export default function Home() {
           minute: "2-digit",
         }),
         routedAgent: response.routed_agent,
+        agentStatus: response.agent_status,
+        suggestedWorkspaceMode: response.suggested_workspace_mode as WorkspaceMode | null,
+        suggestedAction: response.suggested_action,
+        suggestedPath: response.suggested_path,
         actionChangeSetId: actionChangeSetId || undefined,
       };
+      if (response.suggested_workspace_mode === "architecture") {
+        setWorkspaceMode("architecture");
+      }
       setMessagesByChat((current) => ({
         ...current,
         [activeChatId]: [...(current[activeChatId] ?? []), chatMessage],
@@ -1243,6 +1288,14 @@ export default function Home() {
               onOpenFile={handleOpenFile}
               onSearchCode={handleSearchCode}
               onReadGitDiff={handleReadGitDiff}
+            />
+          ) : workspaceMode === "architecture" ? (
+            <ArchitectureView
+              selectedProject={selectedProject}
+              selectedProjectId={selectedProjectId}
+              files={projectFiles}
+              loadingFilesProjectId={loadingFilesProjectId}
+              onOpenFile={handleOpenFile}
             />
           ) : workspaceMode === "navigator" ? (
             <NavigatorView

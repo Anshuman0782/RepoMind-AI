@@ -100,7 +100,7 @@ async def collect_planning_evidence(project_id: str, message: str) -> list[dict]
 async def plan_change(project_id: str, message: str) -> tuple[str, list[SourceChunk], list[dict] | None]:
     chunks = await collect_planning_evidence(project_id, message)
     sources = [SourceChunk(**chunk) for chunk in chunks]
-    proposed_operations = _proposed_operations_from_request(message)
+    proposed_operations = await _proposed_operations_from_request(message)
     direct_plan = _direct_change_plan(message, chunks)
     if direct_plan:
         return direct_plan, sources, proposed_operations
@@ -119,7 +119,7 @@ async def plan_change(project_id: str, message: str) -> tuple[str, list[SourceCh
     return answer, sources, proposed_operations
 
 
-def _proposed_operations_from_request(message: str) -> list[dict] | None:
+async def _proposed_operations_from_request(message: str) -> list[dict] | None:
     action = _requested_file_action(message)
     if not action:
         return None
@@ -132,19 +132,36 @@ def _proposed_operations_from_request(message: str) -> list[dict] | None:
         return [{"action": action, "path": path}]
 
     content = _requested_file_content(message)
+    if action == "create" and content is None:
+        content = await _generated_create_file_content(message, path)
     if content is None:
         return None
 
     return [{"action": action, "path": path, "content": content}]
 
 
+def requested_file_intent(message: str) -> dict:
+    return {
+        "action": _requested_file_action(message),
+        "path": _requested_file_path(message),
+        "has_content": _requested_file_content(message) is not None,
+    }
+
+
 def _requested_file_action(message: str) -> str | None:
     lowered = message.lower()
+    path = _requested_file_path(message)
     if re.search(r"\b(delete|remove)\b.*\bfile\b|\bfile\b.*\b(delete|remove)\b", lowered):
         return "delete"
     if re.search(r"\b(create|add|new)\b.*\bfile\b|\bfile\b.*\b(create|add|new)\b", lowered):
         return "create"
     if re.search(r"\b(edit|update|replace|modify)\b.*\bfile\b|\bfile\b.*\b(edit|update|replace|modify)\b", lowered):
+        return "edit"
+    if path and re.search(r"\b(delete|remove)\b", lowered):
+        return "delete"
+    if path and re.search(r"\b(create|add|new|make|build)\b", lowered):
+        return "create"
+    if path and re.search(r"\b(edit|update|replace|modify|change)\b", lowered):
         return "edit"
     return None
 
@@ -152,7 +169,7 @@ def _requested_file_action(message: str) -> str | None:
 def _requested_file_path(message: str) -> str | None:
     patterns = [
         r"(?:path|file path|filepath)\s*[:=]\s*`?([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)`?",
-        r"(?:create|add|new|edit|update|replace|modify|delete|remove)\s+(?:a\s+|the\s+)?(?:file\s+)?`?([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)`?",
+        r"(?:create|add|new|make|build|edit|update|replace|modify|change|delete|remove)\s+(?:a\s+|the\s+)?(?:file\s+)?`?([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)`?",
         r"(?:file|called|named)\s+`?([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)`?",
     ]
     for pattern in patterns:
@@ -177,6 +194,76 @@ def _requested_file_content(message: str) -> str | None:
 
     content = marker.group(1).strip()
     return content or None
+
+
+async def _generated_create_file_content(message: str, path: str) -> str:
+    prompt = (
+        "Generate complete starter content for the requested new file. "
+        "Return only the file content, with no markdown fence and no explanation. "
+        "Keep it small, valid, and directly matched to the file extension and user request. "
+        "If the request is vague, create a minimal useful starter file.\n\n"
+        f"File path: {path}\n"
+        f"User request: {message}"
+    )
+    try:
+        content = await generate_answer(prompt, [])
+        if content.strip().lower().startswith("mock mode is working"):
+            return _fallback_create_file_content(path, message)
+        return _strip_code_fence(content)
+    except LLMProviderError:
+        return _fallback_create_file_content(path, message)
+
+
+def _strip_code_fence(content: str) -> str:
+    cleaned = content.strip()
+    cleaned = re.sub(r"^```[a-zA-Z0-9_+#.-]*\s*", "", cleaned)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    return f"{cleaned.rstrip()}\n"
+
+
+def _fallback_create_file_content(path: str, message: str) -> str:
+    lowered_path = path.lower()
+    lowered_message = message.lower()
+    if lowered_path.endswith((".c", ".cc", ".cpp", ".cxx", ".c++")):
+        if "calculator" in lowered_message:
+            return (
+                "#include <iostream>\n\n"
+                "int main() {\n"
+                "    double left = 0;\n"
+                "    double right = 0;\n"
+                "    char operation = '+';\n\n"
+                "    std::cout << \"Enter: number operator number: \";\n"
+                "    std::cin >> left >> operation >> right;\n\n"
+                "    switch (operation) {\n"
+                "        case '+': std::cout << left + right; break;\n"
+                "        case '-': std::cout << left - right; break;\n"
+                "        case '*': std::cout << left * right; break;\n"
+                "        case '/':\n"
+                "            if (right == 0) {\n"
+                "                std::cout << \"Cannot divide by zero\";\n"
+                "                return 1;\n"
+                "            }\n"
+                "            std::cout << left / right;\n"
+                "            break;\n"
+                "        default:\n"
+                "            std::cout << \"Unsupported operation\";\n"
+                "            return 1;\n"
+                "    }\n\n"
+                "    std::cout << std::endl;\n"
+                "    return 0;\n"
+                "}\n"
+            )
+        return "#include <iostream>\n\nint main() {\n    std::cout << \"Hello\" << std::endl;\n    return 0;\n}\n"
+    if lowered_path.endswith((".js", ".jsx", ".ts", ".tsx")):
+        return "export function main() {\n  return \"Hello\";\n}\n"
+    if lowered_path.endswith(".py"):
+        return "def main():\n    print(\"Hello\")\n\n\nif __name__ == \"__main__\":\n    main()\n"
+    if lowered_path.endswith((".md", ".mdx")):
+        title = path.rsplit("/", 1)[-1].rsplit(".", 1)[0].replace("-", " ").replace("_", " ").title()
+        return f"# {title}\n\nAdd project notes here.\n"
+    if lowered_path.endswith(".html"):
+        return "<!doctype html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\" />\n  <title>New Page</title>\n</head>\n<body>\n  <h1>New Page</h1>\n</body>\n</html>\n"
+    return ""
 
 
 def _direct_change_plan(message: str, chunks: list[dict]) -> str | None:

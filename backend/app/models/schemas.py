@@ -138,6 +138,8 @@ class ChatResponse(BaseModel):
     routed_agent: str | None = None
     agent_status: str | None = None
     suggested_workspace_mode: str | None = None
+    suggested_action: str | None = None
+    suggested_path: str | None = None
 
 
 class ChatMessageResponse(BaseModel):

@@ -26,7 +26,7 @@ from app.services.documentation_service import (
 )
 from app.services.investigation_service import investigate_codebase
 from app.services.llm_provider import LLMProviderError, generate_answer
-from app.services.planner_service import plan_change
+from app.services.planner_service import plan_change, requested_file_intent
 from app.services.review_service import review_changes
 from app.services.vector_store import search_chunks
 
@@ -57,6 +57,8 @@ def to_chat_session_response(chat: dict) -> ChatSessionResponse:
 
 def route_chat_agent(message: str) -> str:
     lowered = message.lower()
+    if is_architecture_view_request(message):
+        return "architecture"
     if is_documentation_request(message):
         if is_readme_file_request(message):
             return "readme_editor"
@@ -65,7 +67,24 @@ def route_chat_agent(message: str) -> str:
         return "review"
     if any(term in lowered for term in ("commit", "pull request", "pr description", "pr title")):
         return "commit"
-    if any(term in lowered for term in ("fix", "create", "edit", "delete", "remove", "update", "refactor", "change file")):
+    if any(
+        term in lowered
+        for term in (
+            "fix",
+            "create",
+            "add",
+            "new",
+            "make",
+            "build",
+            "edit",
+            "modify",
+            "delete",
+            "remove",
+            "update",
+            "refactor",
+            "change file",
+        )
+    ):
         return "planner"
     if any(term in lowered for term in ("bug", "error", "not working", "broken", "fails", "failed", "does nothing")):
         return "bug_investigation"
@@ -79,6 +98,7 @@ def routed_answer(agent: str, answer: str) -> str:
         "planner": "Planner Agent",
         "readme_editor": "Documentation Agent",
         "documentation": "Documentation Agent",
+        "architecture": "Architecture Agent",
         "bug_investigation": "Bug Investigation Agent",
         "navigator": "Navigator Agent",
         "review": "Review Agent",
@@ -96,6 +116,9 @@ def routed_answer(agent: str, answer: str) -> str:
     elif agent == "commit":
         reason = "you asked for commit or pull request help"
         safety = "Use the Commit workspace to approve the actual commit and push."
+    elif agent == "architecture":
+        reason = "you asked to view the repository architecture"
+        safety = "The interactive architecture map is opened in the Architecture workspace."
     else:
         reason = "this needs a specialized codebase investigation"
         safety = "The result is saved here with source references."
@@ -111,9 +134,37 @@ def workspace_for_agent(agent: str) -> str | None:
         return "review"
     if agent == "commit":
         return "commit"
+    if agent == "architecture":
+        return "architecture"
     if agent == "documentation":
         return "chat"
     return None
+
+
+def is_architecture_view_request(message: str) -> bool:
+    lowered = message.lower()
+    if "architecture" not in lowered:
+        return False
+    view_terms = (
+        "view",
+        "show",
+        "open",
+        "display",
+        "visual",
+        "visualize",
+        "map",
+        "diagram",
+    )
+    return any(term in lowered for term in view_terms)
+
+
+def append_editor_redirect(answer: str, path: str | None) -> str:
+    target = f" for `{path}`" if path else ""
+    return (
+        f"{answer}\n\n"
+        "**Editor handoff**\n"
+        f"This looks like an edit request{target}. Chat prepared the context, but full-file edits are safer in Editor where you can load the current file, revise it, preview the diff, and approve."
+    )
 
 
 async def create_chat_session(project_id: str, title: str | None = None) -> dict:
@@ -209,6 +260,9 @@ async def chat(payload: ChatRequest) -> ChatResponse:
 
     routed_agent = route_chat_agent(payload.message)
     proposed_operations = None
+    suggested_action = None
+    suggested_path = None
+    suggested_workspace_mode = workspace_for_agent(routed_agent)
 
     if routed_agent == "readme_editor":
         answer, sources, proposed_operations = await generate_readme_file_change(
@@ -224,6 +278,12 @@ async def chat(payload: ChatRequest) -> ChatResponse:
             payload.project_id,
             payload.message,
         )
+        file_intent = requested_file_intent(payload.message)
+        suggested_action = file_intent["action"]
+        suggested_path = file_intent["path"]
+        if suggested_action == "edit" and not proposed_operations:
+            suggested_workspace_mode = "editor"
+            answer = append_editor_redirect(answer, suggested_path)
         answer = routed_answer(routed_agent, answer)
     elif routed_agent in {"bug_investigation", "navigator"}:
         mode = "bug" if routed_agent == "bug_investigation" else "navigator"
@@ -240,6 +300,12 @@ async def chat(payload: ChatRequest) -> ChatResponse:
         answer = routed_answer(
             routed_agent,
             "I can help draft commit and PR copy from the current diff. Open the Commit workspace, or ask for a code review first if you want one more check before committing.",
+        )
+    elif routed_agent == "architecture":
+        sources = []
+        answer = routed_answer(
+            routed_agent,
+            "I opened the Architecture workspace so you can inspect the repo as an interactive map. Use the focus controls to switch between overview, frontend, backend, and data-oriented layers.",
         )
     else:
         chunks = await search_chunks(payload.project_id, payload.message)
@@ -274,13 +340,19 @@ async def chat(payload: ChatRequest) -> ChatResponse:
     await db.chats.update_one({"_id": payload.chat_id}, {"$set": update_fields})
 
     agent_status = "approval_required" if proposed_operations else "completed"
+    if suggested_workspace_mode == "editor" and suggested_action == "edit":
+        agent_status = "redirect_required"
+    if suggested_workspace_mode == "architecture":
+        agent_status = "redirect_required"
     return ChatResponse(
         answer=answer,
         sources=sources,
         proposed_operations=proposed_operations,
         routed_agent=routed_agent if routed_agent != "chat" else None,
         agent_status=agent_status if routed_agent != "chat" else None,
-        suggested_workspace_mode=workspace_for_agent(routed_agent),
+        suggested_workspace_mode=suggested_workspace_mode,
+        suggested_action=suggested_action,
+        suggested_path=suggested_path,
     )
 
 

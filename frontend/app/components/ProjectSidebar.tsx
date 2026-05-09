@@ -131,7 +131,7 @@ export function ProjectSidebar({
                   type="button"
                   className="absolute right-14 top-2 rounded-md px-2 py-1 text-xs text-zinc-500 opacity-0 transition hover:bg-white hover:text-ink group-hover/project:opacity-100 group-focus-within/project:opacity-100 disabled:opacity-40"
                   onClick={() => onReindexProject(project.id)}
-                  disabled={busy}
+                  disabled={busy || project.status === "importing" || project.status === "indexing"}
                   title="Re-index project"
                 >
                   {pendingAction === "reindex-project" ? "..." : "Index"}
