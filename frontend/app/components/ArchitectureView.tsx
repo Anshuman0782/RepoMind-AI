@@ -7,6 +7,8 @@ import {
   Database,
   FileCode2,
   Files,
+  Maximize2,
+  Minimize2,
   GitBranch,
   Layers3,
   Network,
@@ -535,6 +537,7 @@ export function ArchitectureView({
 }: ArchitectureViewProps) {
   const [focusMode, setFocusMode] = useState<FocusMode>("overview");
   const [selectedNodeId, setSelectedNodeId] = useState<string>("");
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const architecture = useMemo(() => buildArchitecture(files), [files]);
   const visibleNodeIds = new Set(
     architecture.nodes.filter((node) => nodeMatchesFocus(node, focusMode)).map((node) => node.id),
@@ -556,6 +559,163 @@ export function ArchitectureView({
     selectedNode?.paths.reduce((sum, path) => sum + (fileSizes.get(path) ?? 0), 0) ?? 0;
   const diagramLayout = getDiagramLayout(visibleNodes);
   const diagramLayoutById = new Map(diagramLayout.map((item) => [item.node.id, item]));
+  const renderDiagram = (fullscreen = false) => (
+    <div className={`hidden overflow-auto bg-zinc-950 lg:block ${fullscreen ? "h-full p-6" : "p-4"}`}>
+      <div
+        className={`relative rounded-md border border-zinc-800 bg-zinc-950 ${fullscreen ? "mx-auto" : ""}`}
+        style={{ width: DIAGRAM_WIDTH, height: DIAGRAM_HEIGHT }}
+      >
+        <svg
+          className="absolute inset-0 h-full w-full"
+          viewBox={`0 0 ${DIAGRAM_WIDTH} ${DIAGRAM_HEIGHT}`}
+          aria-hidden="true"
+        >
+          <defs>
+            <marker
+              id={fullscreen ? "architecture-arrow-fullscreen" : "architecture-arrow"}
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#9ca3af" />
+            </marker>
+          </defs>
+          {visibleConnections.map((connection) => {
+            const from = diagramLayoutById.get(connection.from);
+            const to = diagramLayoutById.get(connection.to);
+            if (!from || !to) {
+              return null;
+            }
+            const startX = from.x + NODE_WIDTH;
+            const startY = from.y + NODE_HEIGHT / 2;
+            const endX = to.x;
+            const endY = to.y + NODE_HEIGHT / 2;
+            const bend = Math.max(48, Math.abs(endX - startX) / 2);
+            const labelX = (startX + endX) / 2;
+            const labelY = (startY + endY) / 2 - 8;
+            return (
+              <g key={`${connection.from}-${connection.to}`}>
+                <path
+                  d={`M ${startX} ${startY} C ${startX + bend} ${startY}, ${endX - bend} ${endY}, ${endX} ${endY}`}
+                  fill="none"
+                  stroke="#9ca3af"
+                  strokeWidth="1.4"
+                  markerEnd={`url(#${fullscreen ? "architecture-arrow-fullscreen" : "architecture-arrow"})`}
+                />
+                <text
+                  x={labelX}
+                  y={labelY}
+                  textAnchor="middle"
+                  className="fill-zinc-400 text-[11px]"
+                >
+                  {connection.label}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+
+        {diagramLayout.map(({ node, x, y }) => {
+          const Icon = node.icon;
+          const selected = selectedNode?.id === node.id;
+          return (
+            <button
+              key={node.id}
+              type="button"
+              className={`absolute rounded-sm border px-4 py-3 text-left shadow-sm transition hover:border-teal-300 hover:bg-zinc-800 ${
+                selected ? "border-teal-300 bg-zinc-800 ring-1 ring-teal-300" : "border-zinc-700 bg-zinc-900"
+              }`}
+              style={{ left: x, top: y, width: NODE_WIDTH, minHeight: NODE_HEIGHT }}
+              onClick={() => setSelectedNodeId(node.id)}
+            >
+              <span className="flex items-center gap-2">
+                <Icon className={selected ? "h-4 w-4 text-teal-300" : "h-4 w-4 text-zinc-400"} />
+                <span className="min-w-0 flex-1 truncate text-xs font-semibold text-white">
+                  {node.title}
+                </span>
+              </span>
+              <span className="mt-2 flex items-center justify-between gap-2 text-[11px] text-zinc-400">
+                <span className="truncate">{LAYERS[node.layer].label}</span>
+                <span>{node.paths.length} files</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+  const renderInspector = (compact = false) => (
+    <>
+      {!compact ? (
+        <div className="rounded-md border border-line bg-white p-4">
+          <h3 className="text-sm font-semibold text-ink">Layer legend</h3>
+          <div className="mt-3 grid gap-2">
+            {Object.entries(LAYERS).map(([key, layer]) => {
+              const count = visibleNodes.filter((node) => node.layer === key).length;
+              return (
+                <div key={key} className="flex items-center justify-between rounded-md border border-line px-3 py-2 text-xs">
+                  <span className={`rounded border px-2 py-1 font-semibold ${layer.tone}`}>{layer.short}</span>
+                  <span className="min-w-0 flex-1 truncate px-3 text-zinc-700">{layer.label}</span>
+                  <span className="text-zinc-500">{count}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="min-h-0 flex-1 rounded-md border border-line bg-white">
+        {selectedNode ? (
+          <>
+            <div className="border-b border-line p-4">
+              <div className="flex items-start gap-3">
+                <span className={`rounded-md border p-2 ${LAYERS[selectedNode.layer].tone}`}>
+                  <selectedNode.icon className="h-4 w-4" />
+                </span>
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-semibold text-ink">{selectedNode.title}</h3>
+                  <p className="mt-1 text-xs leading-5 text-zinc-500">{selectedNode.description}</p>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {selectedNode.signals.map((signal) => (
+                  <span key={signal} className="rounded border border-line bg-panel px-2 py-1 text-xs text-zinc-600">
+                    {signal}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="p-4">
+              <div className="mb-2 flex items-center justify-between text-xs text-zinc-500">
+                <span className="flex items-center gap-2 font-medium text-zinc-600">
+                  <Files className="h-4 w-4" />
+                  Files
+                </span>
+                <span>{formatBytes(selectedNodeSize)}</span>
+              </div>
+              <div className={compact ? "max-h-[calc(100vh-300px)] overflow-y-auto rounded-md border border-line" : "max-h-[360px] overflow-y-auto rounded-md border border-line"}>
+                {selectedNode.paths.map((path) => (
+                  <button
+                    key={path}
+                    type="button"
+                    className="block w-full border-b border-line px-3 py-2 text-left text-xs last:border-b-0 hover:bg-panel"
+                    onClick={() => onOpenFile(path)}
+                  >
+                    <span className="block truncate font-medium text-ink">{path}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="p-4 text-sm text-zinc-500">Pick a node to inspect its source files.</div>
+        )}
+      </div>
+    </>
+  );
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto py-4">
@@ -652,91 +812,17 @@ export function ArchitectureView({
                 })}
               </div>
 
-              <div className="hidden overflow-x-auto bg-zinc-950 p-4 lg:block">
-                <div
-                  className="relative rounded-md border border-zinc-800 bg-zinc-950"
-                  style={{ width: DIAGRAM_WIDTH, height: DIAGRAM_HEIGHT }}
+              <div className="relative">
+                <button
+                  type="button"
+                  className="absolute right-3 top-3 z-10 hidden rounded-md border border-zinc-700 bg-zinc-900 p-2 text-zinc-300 shadow-sm transition hover:border-teal-300 hover:text-white lg:inline-flex"
+                  onClick={() => setIsFullscreen(true)}
+                  aria-label="Open architecture fullscreen"
+                  title="Fullscreen"
                 >
-                  <svg
-                    className="absolute inset-0 h-full w-full"
-                    viewBox={`0 0 ${DIAGRAM_WIDTH} ${DIAGRAM_HEIGHT}`}
-                    aria-hidden="true"
-                  >
-                    <defs>
-                      <marker
-                        id="architecture-arrow"
-                        viewBox="0 0 10 10"
-                        refX="9"
-                        refY="5"
-                        markerWidth="6"
-                        markerHeight="6"
-                        orient="auto-start-reverse"
-                      >
-                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#9ca3af" />
-                      </marker>
-                    </defs>
-                    {visibleConnections.map((connection) => {
-                      const from = diagramLayoutById.get(connection.from);
-                      const to = diagramLayoutById.get(connection.to);
-                      if (!from || !to) {
-                        return null;
-                      }
-                      const startX = from.x + NODE_WIDTH;
-                      const startY = from.y + NODE_HEIGHT / 2;
-                      const endX = to.x;
-                      const endY = to.y + NODE_HEIGHT / 2;
-                      const bend = Math.max(48, Math.abs(endX - startX) / 2);
-                      const labelX = (startX + endX) / 2;
-                      const labelY = (startY + endY) / 2 - 8;
-                      return (
-                        <g key={`${connection.from}-${connection.to}`}>
-                          <path
-                            d={`M ${startX} ${startY} C ${startX + bend} ${startY}, ${endX - bend} ${endY}, ${endX} ${endY}`}
-                            fill="none"
-                            stroke="#9ca3af"
-                            strokeWidth="1.4"
-                            markerEnd="url(#architecture-arrow)"
-                          />
-                          <text
-                            x={labelX}
-                            y={labelY}
-                            textAnchor="middle"
-                            className="fill-zinc-400 text-[11px]"
-                          >
-                            {connection.label}
-                          </text>
-                        </g>
-                      );
-                    })}
-                  </svg>
-
-                  {diagramLayout.map(({ node, x, y }) => {
-                    const Icon = node.icon;
-                    const selected = selectedNode?.id === node.id;
-                    return (
-                      <button
-                        key={node.id}
-                        type="button"
-                        className={`absolute rounded-sm border px-4 py-3 text-left shadow-sm transition hover:border-teal-300 hover:bg-zinc-800 ${
-                          selected ? "border-teal-300 bg-zinc-800 ring-1 ring-teal-300" : "border-zinc-700 bg-zinc-900"
-                        }`}
-                        style={{ left: x, top: y, width: NODE_WIDTH, minHeight: NODE_HEIGHT }}
-                        onClick={() => setSelectedNodeId(node.id)}
-                      >
-                        <span className="flex items-center gap-2">
-                          <Icon className={selected ? "h-4 w-4 text-teal-300" : "h-4 w-4 text-zinc-400"} />
-                          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-white">
-                            {node.title}
-                          </span>
-                        </span>
-                        <span className="mt-2 flex items-center justify-between gap-2 text-[11px] text-zinc-400">
-                          <span className="truncate">{LAYERS[node.layer].label}</span>
-                          <span>{node.paths.length} files</span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                  <Maximize2 className="h-4 w-4" />
+                </button>
+                {renderDiagram()}
               </div>
               </>
             ) : (
@@ -756,72 +842,33 @@ export function ArchitectureView({
           </div>
 
           <aside className="flex min-h-0 flex-col gap-4">
-            <div className="rounded-md border border-line bg-white p-4">
-              <h3 className="text-sm font-semibold text-ink">Layer legend</h3>
-              <div className="mt-3 grid gap-2">
-                {Object.entries(LAYERS).map(([key, layer]) => {
-                  const count = visibleNodes.filter((node) => node.layer === key).length;
-                  return (
-                    <div key={key} className="flex items-center justify-between rounded-md border border-line px-3 py-2 text-xs">
-                      <span className={`rounded border px-2 py-1 font-semibold ${layer.tone}`}>{layer.short}</span>
-                      <span className="min-w-0 flex-1 truncate px-3 text-zinc-700">{layer.label}</span>
-                      <span className="text-zinc-500">{count}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="min-h-0 flex-1 rounded-md border border-line bg-white">
-              {selectedNode ? (
-                <>
-                  <div className="border-b border-line p-4">
-                    <div className="flex items-start gap-3">
-                      <span className={`rounded-md border p-2 ${LAYERS[selectedNode.layer].tone}`}>
-                        <selectedNode.icon className="h-4 w-4" />
-                      </span>
-                      <div className="min-w-0">
-                        <h3 className="truncate text-sm font-semibold text-ink">{selectedNode.title}</h3>
-                        <p className="mt-1 text-xs leading-5 text-zinc-500">{selectedNode.description}</p>
-                      </div>
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {selectedNode.signals.map((signal) => (
-                        <span key={signal} className="rounded border border-line bg-panel px-2 py-1 text-xs text-zinc-600">
-                          {signal}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="p-4">
-                    <div className="mb-2 flex items-center justify-between text-xs text-zinc-500">
-                      <span className="flex items-center gap-2 font-medium text-zinc-600">
-                        <Files className="h-4 w-4" />
-                        Files
-                      </span>
-                      <span>{formatBytes(selectedNodeSize)}</span>
-                    </div>
-                    <div className="max-h-[360px] overflow-y-auto rounded-md border border-line">
-                      {selectedNode.paths.map((path) => (
-                        <button
-                          key={path}
-                          type="button"
-                          className="block w-full border-b border-line px-3 py-2 text-left text-xs last:border-b-0 hover:bg-panel"
-                          onClick={() => onOpenFile(path)}
-                        >
-                          <span className="block truncate font-medium text-ink">{path}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="p-4 text-sm text-zinc-500">Pick a node to inspect its source files.</div>
-              )}
-            </div>
+            {renderInspector()}
           </aside>
         </div>
       </div>
+      {isFullscreen ? (
+        <div className="fixed inset-0 z-[9999] bg-zinc-950">
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-950 px-4 py-3 text-white">
+              <div>
+                <p className="text-sm font-semibold">Architecture map</p>
+                <p className="text-xs text-zinc-400">{selectedProject?.name ?? "Selected project"}</p>
+              </div>
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-100 hover:bg-zinc-800"
+                onClick={() => setIsFullscreen(false)}
+              >
+                <Minimize2 className="h-4 w-4" />
+                Exit
+              </button>
+            </div>
+            <div className="min-h-0 flex-1">
+              {renderDiagram(true)}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

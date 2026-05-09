@@ -59,33 +59,16 @@ def route_chat_agent(message: str) -> str:
     lowered = message.lower()
     if is_architecture_view_request(message):
         return "architecture"
+    if is_readme_file_request(message):
+        return "readme_editor"
+    if is_file_change_request(message):
+        return "planner"
     if is_documentation_request(message):
-        if is_readme_file_request(message):
-            return "readme_editor"
         return "documentation"
     if any(term in lowered for term in ("review diff", "review changes", "review current", "code review")):
         return "review"
     if any(term in lowered for term in ("commit", "pull request", "pr description", "pr title")):
         return "commit"
-    if any(
-        term in lowered
-        for term in (
-            "fix",
-            "create",
-            "add",
-            "new",
-            "make",
-            "build",
-            "edit",
-            "modify",
-            "delete",
-            "remove",
-            "update",
-            "refactor",
-            "change file",
-        )
-    ):
-        return "planner"
     if any(term in lowered for term in ("bug", "error", "not working", "broken", "fails", "failed", "does nothing")):
         return "bug_investigation"
     if lowered.startswith("where ") or any(term in lowered for term in ("where is", "where are", "find area", "handled", "implemented")):
@@ -96,7 +79,7 @@ def route_chat_agent(message: str) -> str:
 def routed_answer(agent: str, answer: str) -> str:
     labels = {
         "planner": "Planner Agent",
-        "readme_editor": "Documentation Agent",
+        "readme_editor": "README Agent",
         "documentation": "Documentation Agent",
         "architecture": "Architecture Agent",
         "bug_investigation": "Bug Investigation Agent",
@@ -107,7 +90,10 @@ def routed_answer(agent: str, answer: str) -> str:
     label = labels.get(agent)
     if not label:
         return answer
-    if agent in {"planner", "readme_editor"}:
+    if agent == "readme_editor":
+        reason = "you asked to create or update README documentation"
+        safety = "The README draft is prepared as an edit preview so you can approve it before any file changes."
+    elif agent == "planner":
         reason = "this looks like a file change request"
         safety = "No files will change until you approve the edit preview."
     elif agent == "review":
@@ -143,7 +129,40 @@ def workspace_for_agent(agent: str) -> str | None:
 
 def is_architecture_view_request(message: str) -> bool:
     lowered = message.lower()
-    if "architecture" not in lowered:
+    edit_terms = (
+        "add",
+        "create",
+        "edit",
+        "modify",
+        "update",
+        "write",
+        "generate",
+        "replace",
+        "readme",
+        "readme.md",
+    )
+    if any(term in lowered for term in edit_terms):
+        return False
+
+    architecture_terms = (
+        "architecture",
+        "architecture map",
+        "file structure",
+        "folder structure",
+        "project structure",
+        "repo structure",
+        "repository structure",
+        "directory structure",
+        "diagram",
+        "er diagram",
+        "erd",
+        "entity relationship",
+        "data model",
+        "schema diagram",
+        "system map",
+        "dependency map",
+    )
+    if not any(term in lowered for term in architecture_terms):
         return False
     view_terms = (
         "view",
@@ -154,8 +173,32 @@ def is_architecture_view_request(message: str) -> bool:
         "visualize",
         "map",
         "diagram",
+        "structure",
+        "overview",
     )
-    return any(term in lowered for term in view_terms)
+    return any(term in lowered for term in view_terms) or lowered.strip() in architecture_terms
+
+
+def is_file_change_request(message: str) -> bool:
+    lowered = message.lower()
+    return any(
+        term in lowered
+        for term in (
+            "fix",
+            "create",
+            "add",
+            "new",
+            "make",
+            "build",
+            "edit",
+            "modify",
+            "delete",
+            "remove",
+            "update",
+            "refactor",
+            "change file",
+        )
+    )
 
 
 def append_editor_redirect(answer: str, path: str | None) -> str:

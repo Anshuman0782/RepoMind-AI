@@ -33,7 +33,7 @@ def is_readme_file_request(message: str) -> bool:
     lowered = message.lower()
     if "readme" not in lowered:
         return False
-    file_terms = ("file", "readme.md", "write", "create", "generate", "update", "improve", "replace")
+    file_terms = ("file", "readme.md", "add", "write", "create", "generate", "update", "improve", "replace")
     return any(term in lowered for term in file_terms)
 
 

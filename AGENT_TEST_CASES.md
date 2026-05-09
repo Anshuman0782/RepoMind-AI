@@ -1,422 +1,331 @@
-# RepoMind AI Agent Test Cases
+# RepoMind AI User Manual And Capability Checklist
 
-Use these tests before moving to the next goal. Run them from the UI against the imported sample project that contains `index.html`.
+This document explains what RepoMind AI can do after you import a repository. Use it as a user guide, a demo script, and a manual checklist before shipping new agent features.
 
-The current `index.html` bug is the baseline:
+RepoMind is built around one simple workflow:
 
-- The click handler may be malformed as `button.addEventListener("click", => ()  {` or similar.
-- The random color line uses `math.floor(...)` instead of `Math.floor(...)`.
-- Expected working behavior after a fix: clicking `Change Color` changes the page background and the browser console has no JavaScript error.
+1. Import or select a repository.
+2. Ask questions in Chat or open a focused workspace.
+3. Let the right agent prepare answers, maps, plans, edits, reviews, or commit text.
+4. Approve file changes only after reviewing the diff.
 
-## Test 1: Chat Agent
+## Core Workspaces
 
-Tab: Chat
+### Chat
 
-Prompt:
+Use Chat when you want a natural language entry point. Chat can answer questions directly or route your request to a specialist agent.
+
+Example prompts:
 
 ```text
-What does index.html do, and why might the Change Color button fail?
+What does this repository do?
 ```
 
-Expected:
+```text
+Where is authentication handled?
+```
 
-- Explains that `index.html` renders a centered heading and `Change Color` button.
-- Mentions the script chooses a random color and sets `document.body.style.backgroundColor`.
-- Identifies likely JavaScript issues around the click handler and/or `math.floor`.
-- Shows source references for `index.html`.
+```text
+Show me this repo architecture.
+```
 
-Send me:
+```text
+Add me a README.md file.
+```
 
-- The answer text.
-- Whether source references appeared.
+Expected behavior:
 
-## Test 2: File Explorer Tools
+- General questions get a grounded answer with source references when evidence is available.
+- Architecture-style requests open the Architecture workspace.
+- File-change requests route to Planner, README Agent, or Editor handoff.
+- No file is changed without an approval-gated diff preview.
 
-Tab: Files
+### Architecture
+
+Use Architecture to visually inspect the repository structure.
+
+Supported request words from Chat:
+
+- `architecture`
+- `file structure`
+- `folder structure`
+- `project structure`
+- `repo structure`
+- `diagram`
+- `ER diagram`
+- `ERD`
+- `data model`
+- `schema diagram`
+- `system map`
+- `dependency map`
+
+Example prompts:
+
+```text
+Can you view me this repo architecture?
+```
+
+```text
+Show file structure.
+```
+
+```text
+Open ER diagram.
+```
+
+Expected behavior:
+
+- Chat routes to Architecture Agent.
+- The app opens the Architecture tab.
+- The diagram groups files into layers such as interface, client code, backend code, data/content, docs/tests, and project setup.
+- The fullscreen button opens a larger diagram view.
+- Clicking a node shows related files in the inspector.
+
+### Files
+
+Use Files to browse, search, and inspect repository content.
 
 Actions:
 
-1. Search for:
+1. Filter files by name.
+2. Search code text.
+3. Open a file.
+4. Read the current git diff.
+
+Expected behavior:
+
+- File search returns matching file paths and lines.
+- Opening a result loads the file viewer.
+- Git diff shows uncommitted changes or `No uncommitted changes.`
+
+### Navigator
+
+Use Navigator to find where a feature, behavior, route, or symbol is implemented.
+
+Example prompts:
 
 ```text
-math.floor
+Where is login handled?
 ```
-
-2. Open `index.html`.
-3. Click `Git diff`.
-
-Expected:
-
-- Search finds `index.html` at the line containing `math.floor`.
-- File viewer opens the full file.
-- Git diff shows current uncommitted changes or `No uncommitted changes.`
-
-Send me:
-
-- Search result line.
-- Whether file viewer opened correctly.
-- Git diff result summary.
-
-## Test 3: Navigator Agent
-
-Tab: Navigator
-
-Mode: Find area
-
-Prompt:
 
 ```text
-Where is the Change Color button behavior handled?
+Find the area responsible for saving projects.
 ```
-
-Expected:
-
-- Points to `index.html`.
-- Mentions the `colorBtn` button and click listener.
-- Explains the color list and body background update.
-- Saves result into chat.
-
-Send me:
-
-- The answer text.
-
-## Test 4: Bug Investigation Agent
-
-Tab: Navigator
-
-Mode: Investigate bug
-
-Prompt:
 
 ```text
-The Change Color button does not change the background. Find the likely cause and suggest the fix location.
+Where does the frontend call the backend API?
 ```
 
-Expected:
+Expected behavior:
 
-- Identifies `index.html` as the fix location.
-- Flags malformed click handler if present.
-- Flags `math.floor` should be `Math.floor`.
-- Suggests verifying by opening the page and clicking the button.
-- Does not edit files.
+- Navigator points to likely files and responsibilities.
+- Result is saved into the active chat.
+- Sources are shown when available.
 
-Send me:
+### Bug Investigation
 
-- The findings and suggested fix locations.
+Use Navigator's Investigate bug mode when something fails and you want likely causes.
 
-## Test 5: Planner Agent
-
-Tab: Planner
-
-Prompt:
+Example prompts:
 
 ```text
-Fix the Change Color button bug in index.html.
+The import button is slow. Find the likely cause.
 ```
-
-Expected:
-
-- Creates a change plan only.
-- Mentions `index.html`.
-- Includes risks and suggested tests.
-- Shows an approval gate.
-- If the system cannot safely create an edit preview from this broad request, that is acceptable.
-
-Send me:
-
-- The plan.
-- Whether a diff preview appeared.
-
-## Test 6: Planner To Editor Agent Handoff
-
-Tab: Planner
-
-Prompt:
 
 ```text
-Create file path: agent-test.html content:
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Agent Test</title>
-</head>
-<body>
-  <h1>Agent test page</h1>
-</body>
-</html>
+The page opens but the button does nothing.
 ```
 
-Expected:
+Expected behavior:
 
-- Planner saves the plan into chat.
-- Planner prepares an Editor Agent diff preview for `agent-test.html`.
-- No file is created until approval.
-- Button shown: `Approve edit`.
+- Bug Investigation Agent explains likely causes and fix locations.
+- It does not edit files.
+- It suggests verification steps.
+- Result is saved into chat.
 
-Approval test:
+### Planner
 
-1. Click `Approve edit`.
-2. Confirm file is created.
-3. Confirm the UI then asks for `Approve Review Agent`.
-4. Do not approve review yet.
+Use Planner for change requests. Planner should create a plan and, when safe, prepare an approval-gated edit preview.
 
-Send me:
-
-- The diff preview.
-- Whether the file was created only after approval.
-- Whether Review Agent waited for separate approval.
-
-## Test 7: Review Agent Approval
-
-Continue from Test 6.
-
-Action:
-
-Click `Approve Review Agent`.
-
-Expected:
-
-- Review Agent runs only after this approval.
-- Review result is saved into chat.
-- It reviews the just-applied change set.
-- It suggests relevant verification, such as opening `agent-test.html`.
-
-Send me:
-
-- The review output.
-
-## Test 8: Manual Editor Fallback
-
-Tab: Editor
-
-Action:
-
-1. Select `create`.
-2. File path:
+Example prompts:
 
 ```text
-manual-editor-test.html
+Add loading feedback while a repository is importing.
 ```
 
-3. Full file content:
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-<body>
-  <h1>Manual editor test</h1>
-</body>
-</html>
+```text
+Create file docs/architecture.md with a short architecture overview.
 ```
 
+```text
+Delete file docs/old-notes.md.
+```
+
+Expected behavior:
+
+- Broad requests produce a plan, risks, and suggested tests.
+- Concrete create/delete requests can produce a diff preview.
+- No file is created, edited, or deleted until `Approve edit`.
+- After applying an edit, Review Agent approval is offered separately.
+
+### Editor
+
+Use Editor for manual, full-file changes.
+
+Common workflow:
+
+1. Choose `create`, `edit`, or `delete`.
+2. Enter the file path.
+3. For create/edit, provide full file content.
 4. Click `Preview diff`.
-5. Click `Apply approved edit`.
+5. Review the diff.
+6. Click `Apply approved edit`.
 
-Expected:
+Expected behavior:
 
-- Diff preview appears before file creation.
-- File is created after approval.
-- Manual editor shows the review suggestion prompt.
+- Diff preview appears before any file change.
+- Applying happens only after approval.
+- After apply, the app suggests Review Agent.
 
-Send me:
+### Review
 
-- The diff preview.
-- Whether apply worked.
+Use Review to inspect current changes or a just-applied change set.
 
-## Test 9: Documentation Agent
-
-Tab: Planner
-
-Prompt:
+Example prompts:
 
 ```text
-Explain file: index.html
+Review the current changes.
 ```
 
-Expected:
+```text
+Review the Planner-approved edit.
+```
 
-- Routes to Documentation Agent.
-- Explains page structure, styles, script responsibility, and known risks.
-- Does not create an edit preview.
-- Saves result into chat.
+Expected behavior:
 
-Send me:
+- Review Agent focuses on bugs, regressions, risks, and missing tests.
+- It does not change files.
+- Review output is saved into chat.
 
-- The documentation answer.
+### Commit
 
-## Test 10: README Or Setup Documentation
+Use Commit to draft commit and pull request text from the current diff.
 
-Tab: Planner
+Example prompt:
 
-Prompt:
+```text
+Draft commit and PR copy for the current changes.
+```
+
+Expected behavior:
+
+- Commit Assistant summarizes changed files.
+- It drafts a commit message, PR title, and PR description.
+- Actual commit/push requires user approval.
+
+### README Agent
+
+Use README Agent to create or improve README documentation.
+
+Example prompts:
+
+```text
+Add me a README.md file.
+```
+
+```text
+Generate README improvements.
+```
+
+```text
+Update README setup notes.
+```
+
+Expected behavior:
+
+- Chat routes to README Agent.
+- README Agent prepares a `README.md` create/edit preview.
+- The README is not written until `Approve edit`.
+- After approval, Commit Assistant can draft commit/PR copy.
+
+### Documentation Agent
+
+Use Documentation Agent for explanations, setup notes, onboarding notes, or API docs that do not need direct file edits.
+
+Example prompts:
+
+```text
+Explain this repository architecture.
+```
 
 ```text
 Generate setup notes for this project.
 ```
 
-Expected:
-
-- Routes to Documentation Agent.
-- Generates setup notes only from visible repo evidence.
-- Says what is unknown if setup evidence is thin.
-- Does not create/edit files.
-
-Send me:
-
-- The generated setup notes.
-
-## Test 11: Delete Approval
-
-Tab: Planner
-
-Prompt:
-
 ```text
-Delete file: agent-test.html
+Explain file: src/main.js
 ```
 
-Expected:
+Expected behavior:
 
-- Planner prepares a delete diff preview if `agent-test.html` exists.
-- File is not deleted until `Approve edit`.
-- After approval, asks separately before Review Agent.
+- Documentation is grounded in available repository evidence.
+- Unknown details are called out instead of invented.
+- No edit preview is created unless the prompt asks for a README file change.
 
-Send me:
+## Routing Checklist
 
-- The delete diff preview.
-- Whether separate review approval appeared.
+Use these prompts to confirm Chat routes to the right agent.
 
-## Test 12: Chat Routes To Planner With Inline Approval
+| Prompt | Expected route | Expected workspace |
+| --- | --- | --- |
+| `Show file structure` | Architecture Agent | Architecture |
+| `Open ER diagram` | Architecture Agent | Architecture |
+| `Show me this repo architecture` | Architecture Agent | Architecture |
+| `Explain repo architecture` | Documentation Agent | Chat |
+| `Add me a README.md file` | README Agent | Planner approval |
+| `Create docs/notes.md` | Planner Agent | Planner approval |
+| `Edit src/main.js and change the title` | Planner Agent with Editor handoff | Editor |
+| `Review current changes` | Review Agent | Review |
+| `Draft PR description` | Commit Assistant | Commit |
+| `Where is login handled?` | Navigator Agent | Navigator |
 
-Tab: Chat
+## Approval Rules
 
-Prompt:
+RepoMind should follow these safety rules:
 
-```text
-Fix the Change Color button bug in index.html.
-```
+- Chat answers can be immediate.
+- Investigation, Navigator, Documentation, and Review do not edit files.
+- Planner, README Agent, and Editor may prepare file changes.
+- File changes must show a diff preview before applying.
+- User must approve before create/edit/delete changes are written.
+- Review Agent runs only after separate approval when offered.
+- Commit and push require explicit approval.
 
-Expected:
+## General Test Flow
 
-- Chat says RepoMind routed the request to Planner Agent.
-- Chat shows a plan or file-change explanation.
-- If a concrete edit preview can be prepared, the Chat response shows:
-  - `View diff`
-  - `Approve edit`
-  - `Reject`
-- No file changes before approval.
-- Planner tab mirrors the same change set if opened.
+Run this flow against any imported repository:
 
-Send me:
-
-- Whether the Chat action panel appeared.
-- Whether the diff matched the intended file.
-
-## Test 13: Natural Create File From Chat
-
-Tab: Chat
-
-Prompt:
-
-```text
-create calculator.c++
-```
-
-Expected:
-
-- Chat routes to Planner Agent.
-- Planner generates conservative starter C++ content automatically.
-- Chat shows an approval-gated diff preview for `calculator.c++`.
-- No rigid `path:` or `content:` syntax is required.
-- `calculator.c++` is not created until `Approve edit`.
-
-Send me:
-
-- The first few diff lines.
-- Whether the file was created only after approval.
-
-## Test 14: Natural Delete File From Chat
-
-Prerequisite: `calculator.c++` exists from Test 13.
-
-Tab: Chat
-
-Prompt:
-
-```text
-remove calculator.c++
-```
-
-Expected:
-
-- Chat routes to Planner Agent.
-- Chat shows an approval-gated delete diff for `calculator.c++`.
-- The file is not deleted until `Approve edit`.
-- After approval, Chat offers separate Review Agent approval.
-
-Send me:
-
-- Whether the delete diff appeared.
-- Whether the file was deleted only after approval.
-
-## Test 15: Edit Request Redirects To Editor
-
-Tab: Chat
-
-Prompt:
-
-```text
-edit index.html and change the title
-```
-
-Expected:
-
-- Chat routes to Planner Agent.
-- Chat does not guess and apply a full-file edit.
-- Chat shows `Editor handoff ready`.
-- Clicking `Open Editor` opens the Editor tab.
-- Editor action is `edit` and file path is prefilled as `index.html`.
-- User can load current file, edit manually, preview diff, and approve.
-
-Send me:
-
-- Whether the Editor handoff appeared.
-- Whether Editor opened with the expected action/path.
-
-## Test 16: README File Generation From Chat
-
-Tab: Chat
-
-Prompt:
-
-```text
-Generate README improvements
-```
-
-Expected:
-
-- Chat routes to Documentation Agent.
-- Chat prepares an approval-gated `README.md` edit preview.
-- The README is created or updated only after `Approve edit`.
-- Commit Assistant draft appears after the edit is applied.
-
-Send me:
-
-- Whether the README diff appeared in Chat.
-- Whether commit draft appeared after approval.
+1. Ask Chat: `What does this repository do?`
+2. Ask Chat: `Show file structure.`
+3. Use Architecture fullscreen and click at least one node.
+4. Search for a common term in Files.
+5. Ask Navigator: `Where is the main app entry point?`
+6. Ask Documentation: `Generate setup notes for this project.`
+7. Ask Chat: `Add me a README.md file.`
+8. Confirm a README diff preview appears.
+9. Reject or approve the edit depending on the test goal.
+10. If approved, run Review Agent before committing.
 
 ## Pass Criteria
 
-- Chat answers with source references.
+- Import returns quickly and project status updates while indexing continues.
+- Files workspace can browse and search repository files.
+- Architecture workspace shows a useful diagram for different repo shapes.
+- Architecture fullscreen keeps nodes and arrows aligned.
 - Chat routes specialist requests to the right agent.
-- Chat shows inline edit approval when an agent prepares a change set.
-- Navigator finds relevant files and evidence.
-- Planner creates plans and does not edit broad requests without approval.
-- Concrete and natural create/delete requests create a diff preview.
-- Natural edit requests redirect to Editor instead of guessing risky full-file edits.
-- Editor applies only after approval.
-- Review Agent does not run until separately approved.
-- Documentation Agent handles docs/explain requests from Planner and Chat.
-- README file generation creates approval-gated `README.md` changes.
-- All results are saved into the active chat.
+- README requests create approval-gated README diffs.
+- Planner creates safe plans and approval-gated changes.
+- Editor supports manual create/edit/delete with preview.
+- Review does not run without explicit approval.
+- Commit Assistant drafts useful commit and PR text.
+- Results are saved into the active chat when appropriate.
