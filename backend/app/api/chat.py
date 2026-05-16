@@ -25,6 +25,17 @@ from app.services.documentation_service import (
     is_readme_file_request,
 )
 from app.services.investigation_service import investigate_codebase
+from app.services.language_utils import (
+    MULTILINGUAL_BUG_TERMS,
+    MULTILINGUAL_ARCHITECTURE_TERMS,
+    MULTILINGUAL_ARCHITECTURE_VIEW_TERMS,
+    MULTILINGUAL_CHANGE_TERMS,
+    MULTILINGUAL_COMMIT_TERMS,
+    MULTILINGUAL_NAVIGATION_TERMS,
+    MULTILINGUAL_REVIEW_TERMS,
+    contains_any_term,
+    message_with_language_instruction,
+)
 from app.services.llm_provider import LLMProviderError, generate_answer
 from app.services.planner_service import plan_change, requested_file_intent
 from app.services.review_service import review_changes
@@ -65,18 +76,26 @@ def route_chat_agent(message: str) -> str:
         return "planner"
     if is_documentation_request(message):
         return "documentation"
-    if any(term in lowered for term in ("review diff", "review changes", "review current", "code review")):
+    if contains_any_term(message, MULTILINGUAL_REVIEW_TERMS):
         return "review"
-    if any(term in lowered for term in ("commit", "pull request", "pr description", "pr title")):
+    if contains_any_term(message, MULTILINGUAL_COMMIT_TERMS):
         return "commit"
-    if any(term in lowered for term in ("bug", "error", "not working", "broken", "fails", "failed", "does nothing")):
+    if contains_any_term(message, MULTILINGUAL_BUG_TERMS) or "does nothing" in lowered:
         return "bug_investigation"
-    if lowered.startswith("where ") or any(term in lowered for term in ("where is", "where are", "find area", "handled", "implemented")):
+    if contains_any_term(message, MULTILINGUAL_NAVIGATION_TERMS):
         return "navigator"
     return "chat"
 
 
-def routed_answer(agent: str, answer: str) -> str:
+def routed_answer(
+    agent: str,
+    answer: str,
+    message: str = "",
+    response_language: str | None = "auto",
+) -> str:
+    if response_language not in (None, "auto", "en") or any(ord(char) > 127 for char in message):
+        return answer
+
     labels = {
         "planner": "Planner Agent",
         "readme_editor": "README Agent",
@@ -144,61 +163,16 @@ def is_architecture_view_request(message: str) -> bool:
     if any(term in lowered for term in edit_terms):
         return False
 
-    architecture_terms = (
-        "architecture",
-        "architecture map",
-        "file structure",
-        "folder structure",
-        "project structure",
-        "repo structure",
-        "repository structure",
-        "directory structure",
-        "diagram",
-        "er diagram",
-        "erd",
-        "entity relationship",
-        "data model",
-        "schema diagram",
-        "system map",
-        "dependency map",
-    )
-    if not any(term in lowered for term in architecture_terms):
+    if not contains_any_term(message, MULTILINGUAL_ARCHITECTURE_TERMS):
         return False
-    view_terms = (
-        "view",
-        "show",
-        "open",
-        "display",
-        "visual",
-        "visualize",
-        "map",
-        "diagram",
-        "structure",
-        "overview",
+    return (
+        contains_any_term(message, MULTILINGUAL_ARCHITECTURE_VIEW_TERMS)
+        or lowered.strip() in MULTILINGUAL_ARCHITECTURE_TERMS
     )
-    return any(term in lowered for term in view_terms) or lowered.strip() in architecture_terms
 
 
 def is_file_change_request(message: str) -> bool:
-    lowered = message.lower()
-    return any(
-        term in lowered
-        for term in (
-            "fix",
-            "create",
-            "add",
-            "new",
-            "make",
-            "build",
-            "edit",
-            "modify",
-            "delete",
-            "remove",
-            "update",
-            "refactor",
-            "change file",
-        )
-    )
+    return contains_any_term(message, MULTILINGUAL_CHANGE_TERMS)
 
 
 def append_editor_redirect(answer: str, path: str | None) -> str:
@@ -307,19 +281,24 @@ async def chat(payload: ChatRequest) -> ChatResponse:
     suggested_path = None
     suggested_workspace_mode = workspace_for_agent(routed_agent)
 
+    localized_message = message_with_language_instruction(
+        payload.message,
+        payload.response_language,
+    )
+
     if routed_agent == "readme_editor":
         answer, sources, proposed_operations = await generate_readme_file_change(
             payload.project_id,
-            payload.message,
+            localized_message,
         )
-        answer = routed_answer(routed_agent, answer)
+        answer = routed_answer(routed_agent, answer, payload.message, payload.response_language)
     elif routed_agent == "documentation":
-        answer, sources = await generate_documentation(payload.project_id, payload.message)
-        answer = routed_answer(routed_agent, answer)
+        answer, sources = await generate_documentation(payload.project_id, localized_message)
+        answer = routed_answer(routed_agent, answer, payload.message, payload.response_language)
     elif routed_agent == "planner":
         answer, sources, proposed_operations = await plan_change(
             payload.project_id,
-            payload.message,
+            localized_message,
         )
         file_intent = requested_file_intent(payload.message)
         suggested_action = file_intent["action"]
@@ -327,36 +306,47 @@ async def chat(payload: ChatRequest) -> ChatResponse:
         if suggested_action == "edit" and not proposed_operations:
             suggested_workspace_mode = "editor"
             answer = append_editor_redirect(answer, suggested_path)
-        answer = routed_answer(routed_agent, answer)
+        answer = routed_answer(routed_agent, answer, payload.message, payload.response_language)
     elif routed_agent in {"bug_investigation", "navigator"}:
         mode = "bug" if routed_agent == "bug_investigation" else "navigator"
-        answer, sources = await investigate_codebase(payload.project_id, payload.message, mode)
-        answer = routed_answer(routed_agent, answer)
+        answer, sources = await investigate_codebase(
+            payload.project_id,
+            payload.message,
+            mode,
+            payload.response_language,
+        )
+        answer = routed_answer(routed_agent, answer, payload.message, payload.response_language)
     elif routed_agent == "review":
         try:
-            answer, sources = await review_changes(payload.project_id, payload.message)
+            answer, sources = await review_changes(payload.project_id, localized_message)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        answer = routed_answer(routed_agent, answer)
+        answer = routed_answer(routed_agent, answer, payload.message, payload.response_language)
     elif routed_agent == "commit":
         sources = []
         answer = routed_answer(
             routed_agent,
             "I can help draft commit and PR copy from the current diff. Open the Commit workspace, or ask for a code review first if you want one more check before committing.",
+            payload.message,
+            payload.response_language,
         )
     elif routed_agent == "architecture":
         sources = []
         answer = routed_answer(
             routed_agent,
             "I opened the Architecture workspace so you can inspect the repo as an interactive map. Use the focus controls to switch between overview, frontend, backend, and data-oriented layers.",
+            payload.message,
+            payload.response_language,
         )
     else:
         chunks = await search_chunks(payload.project_id, payload.message)
         chunks = await _augment_chat_context(payload.project_id, payload.message, chunks)
-        answer = direct_chat_answer(payload.message, chunks)
+        answer = None
+        if payload.response_language in (None, "auto", "en"):
+            answer = direct_chat_answer(payload.message, chunks)
         if answer is None:
             try:
-                answer = await generate_answer(payload.message, chunks)
+                answer = await generate_answer(localized_message, chunks)
             except LLMProviderError as exc:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -416,6 +406,7 @@ async def investigate(payload: InvestigationRequest) -> ChatResponse:
         payload.project_id,
         payload.message,
         payload.mode,
+        payload.response_language,
     )
     now = utc_now()
     label = "Bug investigation" if payload.mode == "bug" else "Repo navigator"
@@ -454,14 +445,20 @@ async def create_change_plan(payload: ChangePlanRequest) -> ChatResponse:
         if is_readme_file_request(payload.message):
             answer, sources, proposed_operations = await generate_readme_file_change(
                 payload.project_id,
-                payload.message,
+                message_with_language_instruction(payload.message, payload.response_language),
             )
         else:
-            answer, sources = await generate_documentation(payload.project_id, payload.message)
+            answer, sources = await generate_documentation(
+                payload.project_id,
+                message_with_language_instruction(payload.message, payload.response_language),
+            )
             proposed_operations = None
         question = f"Documentation agent: {payload.message}"
     else:
-        answer, sources, proposed_operations = await plan_change(payload.project_id, payload.message)
+        answer, sources, proposed_operations = await plan_change(
+            payload.project_id,
+            message_with_language_instruction(payload.message, payload.response_language),
+        )
         question = f"Change planner: {payload.message}"
     now = utc_now()
     await db.chat_messages.insert_one(
@@ -497,7 +494,7 @@ async def create_code_review(payload: CodeReviewRequest) -> ChatResponse:
     try:
         answer, sources = await review_changes(
             payload.project_id,
-            payload.message,
+            message_with_language_instruction(payload.message or "", payload.response_language),
             payload.change_set_id,
         )
     except ValueError as exc:

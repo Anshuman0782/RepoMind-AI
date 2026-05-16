@@ -56,6 +56,7 @@ export default function Home() {
   const [name, setName] = useState("");
   const [repoUrl, setRepoUrl] = useState("");
   const [message, setMessage] = useState("");
+  const [responseLanguage, setResponseLanguage] = useState("auto");
   const [chatsByProject, setChatsByProject] = useState<Record<string, ChatSession[]>>({});
   const [messagesByChat, setMessagesByChat] = useState<Record<string, ChatMessage[]>>({});
   const [projectSearch, setProjectSearch] = useState("");
@@ -710,6 +711,7 @@ export default function Home() {
         activeChatId,
         submittedPrompt,
         investigationMode,
+        responseLanguage,
       );
       const prefix = investigationMode === "bug" ? "Bug investigation" : "Repo navigator";
       const chatMessage: ChatMessage = {
@@ -779,7 +781,12 @@ export default function Home() {
       }
 
       const hadMessages = (messagesByChat[activeChatId] ?? []).length > 0;
-      const response = await createChangePlan(selectedProjectId, activeChatId, submittedPrompt);
+      const response = await createChangePlan(
+        selectedProjectId,
+        activeChatId,
+        submittedPrompt,
+        responseLanguage,
+      );
       const plannerLabel = isDocumentationRequest(submittedPrompt) ? "Documentation agent" : "Change planner";
       const chatMessage: ChatMessage = {
         id: crypto.randomUUID(),
@@ -876,6 +883,7 @@ export default function Home() {
         activeChatId,
         submittedPrompt,
         changeSetId,
+        responseLanguage,
       );
       const chatMessage: ChatMessage = {
         id: crypto.randomUUID(),
@@ -1087,7 +1095,12 @@ export default function Home() {
       }
 
       const hadMessages = (messagesByChat[activeChatId] ?? []).length > 0;
-      const response = await sendMessage(selectedProjectId, activeChatId, submittedQuestion);
+      const response = await sendMessage(
+        selectedProjectId,
+        activeChatId,
+        submittedQuestion,
+        responseLanguage,
+      );
       let actionChangeSetId = "";
       if (response.proposed_operations?.length) {
         try {
@@ -1243,6 +1256,7 @@ export default function Home() {
               pendingQuestion={pendingQuestion}
               pendingAction={pendingAction}
               message={message}
+              responseLanguage={responseLanguage}
               busy={busy}
               isLoadingMessages={isLoadingMessages}
               activeEditChangeSet={activeEditChangeSet}
@@ -1251,6 +1265,7 @@ export default function Home() {
               createdCommit={createdCommit}
               messagesEndRef={messagesEndRef}
               setMessage={setMessage}
+              setResponseLanguage={setResponseLanguage}
               setWorkspaceMode={setWorkspaceMode}
               onChat={handleChat}
               onApproveEdit={handleApprovePlannerAutomation}

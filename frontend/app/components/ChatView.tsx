@@ -14,6 +14,7 @@ type ChatViewProps = {
   pendingQuestion: string;
   pendingAction: string;
   message: string;
+  responseLanguage: string;
   busy: boolean;
   isLoadingMessages: boolean;
   activeEditChangeSet: EditChangeSet | null;
@@ -22,6 +23,7 @@ type ChatViewProps = {
   createdCommit: CreatedCommit | null;
   messagesEndRef: RefObject<HTMLDivElement | null>;
   setMessage: (value: string) => void;
+  setResponseLanguage: (value: string) => void;
   setWorkspaceMode: (mode: WorkspaceMode) => void;
   onChat: (event: FormEvent<HTMLFormElement>) => void;
   onApproveEdit: () => void;
@@ -39,6 +41,7 @@ export function ChatView({
   pendingQuestion,
   pendingAction,
   message,
+  responseLanguage,
   busy,
   isLoadingMessages,
   activeEditChangeSet,
@@ -47,6 +50,7 @@ export function ChatView({
   createdCommit,
   messagesEndRef,
   setMessage,
+  setResponseLanguage,
   setWorkspaceMode,
   onChat,
   onApproveEdit,
@@ -184,28 +188,58 @@ export function ChatView({
         )}
       </div>
 
-      <form className="flex flex-col gap-2 border-t border-line pt-3 sm:flex-row sm:gap-3 sm:pt-4" onSubmit={onChat}>
-        <textarea
-          className="min-h-16 flex-1 resize-none rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent sm:min-h-20 sm:text-base"
-          placeholder={selectedProject ? "Ask about the selected repo..." : "Select a project first"}
-          value={message}
-          onChange={(event) => setMessage(event.target.value)}
-          required
-        />
-        <button
-          className="flex h-12 items-center gap-2 rounded-md bg-ink px-5 text-sm font-medium text-white transition-all duration-150 active:scale-[0.97] disabled:opacity-60 sm:h-20"
-          disabled={busy || !selectedProjectId}
-          type="submit"
-        >
-          {pendingAction === "ask" ? (
-            <>
-              <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-              Thinking...
-            </>
-          ) : (
-            <Send size={25} />
-          )}
-        </button>
+      <form className="border-t border-line pt-3 sm:pt-4" onSubmit={onChat}>
+        <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-zinc-500">Ask in any language. Auto replies in the same language.</p>
+          <label className="flex items-center gap-2 text-xs font-medium text-zinc-600">
+            Reply language
+            <select
+              className="rounded-md border border-line bg-white px-2 py-1.5 text-xs outline-none focus:border-accent"
+              value={responseLanguage}
+              onChange={(event) => setResponseLanguage(event.target.value)}
+            >
+              <option value="auto">Auto</option>
+              <option value="en">English</option>
+              <option value="hi">Hindi</option>
+              <option value="bn">Bengali</option>
+              <option value="ta">Tamil</option>
+              <option value="te">Telugu</option>
+              <option value="mr">Marathi</option>
+              <option value="gu">Gujarati</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="pt">Portuguese</option>
+              <option value="ar">Arabic</option>
+              <option value="zh">Chinese</option>
+              <option value="ja">Japanese</option>
+              <option value="ko">Korean</option>
+            </select>
+          </label>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
+          <textarea
+            className="min-h-16 flex-1 resize-none rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent sm:min-h-20 sm:text-base"
+            placeholder={selectedProject ? "Ask about the selected repo..." : "Select a project first"}
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            required
+          />
+          <button
+            className="flex h-12 items-center justify-center gap-2 rounded-md bg-ink px-5 text-sm font-medium text-white transition-all duration-150 active:scale-[0.97] disabled:opacity-60 sm:h-20"
+            disabled={busy || !selectedProjectId}
+            type="submit"
+          >
+            {pendingAction === "ask" ? (
+              <>
+                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                Thinking...
+              </>
+            ) : (
+              <Send size={25} />
+            )}
+          </button>
+        </div>
       </form>
     </>
   );

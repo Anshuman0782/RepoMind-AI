@@ -318,11 +318,17 @@ export async function sendMessage(
   projectId: string,
   chatId: string,
   message: string,
+  responseLanguage = "auto",
 ): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ project_id: projectId, chat_id: chatId, message }),
+    body: JSON.stringify({
+      project_id: projectId,
+      chat_id: chatId,
+      message,
+      response_language: responseLanguage,
+    }),
   });
 
   if (!response.ok) {
@@ -337,6 +343,7 @@ export async function investigateCodebase(
   chatId: string,
   message: string,
   mode: "navigator" | "bug",
+  responseLanguage = "auto",
 ): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE_URL}/api/chat/investigate`, {
     method: "POST",
@@ -346,6 +353,7 @@ export async function investigateCodebase(
       chat_id: chatId,
       message,
       mode,
+      response_language: responseLanguage,
     }),
   });
 
@@ -360,6 +368,7 @@ export async function createChangePlan(
   projectId: string,
   chatId: string,
   message: string,
+  responseLanguage = "auto",
 ): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE_URL}/api/chat/plan`, {
     method: "POST",
@@ -368,6 +377,7 @@ export async function createChangePlan(
       project_id: projectId,
       chat_id: chatId,
       message,
+      response_language: responseLanguage,
     }),
   });
 
@@ -383,6 +393,7 @@ export async function reviewCodeChanges(
   chatId: string,
   message?: string,
   changeSetId?: string,
+  responseLanguage = "auto",
 ): Promise<ChatResponse> {
   const response = await fetch(`${API_BASE_URL}/api/chat/review`, {
     method: "POST",
@@ -392,6 +403,7 @@ export async function reviewCodeChanges(
       chat_id: chatId,
       message: message || undefined,
       change_set_id: changeSetId || undefined,
+      response_language: responseLanguage,
     }),
   });
 

@@ -75,6 +75,7 @@ class ChatRequest(BaseModel):
     project_id: str
     chat_id: str
     message: str = Field(min_length=1)
+    response_language: str | None = Field(default="auto", max_length=20)
 
 
 class InvestigationRequest(BaseModel):
@@ -82,12 +83,14 @@ class InvestigationRequest(BaseModel):
     chat_id: str
     message: str = Field(min_length=1)
     mode: str = Field(pattern="^(navigator|bug)$")
+    response_language: str | None = Field(default="auto", max_length=20)
 
 
 class ChangePlanRequest(BaseModel):
     project_id: str
     chat_id: str
     message: str = Field(min_length=1)
+    response_language: str | None = Field(default="auto", max_length=20)
 
 
 class CodeReviewRequest(BaseModel):
@@ -95,6 +98,7 @@ class CodeReviewRequest(BaseModel):
     chat_id: str
     message: str | None = Field(default=None, max_length=2000)
     change_set_id: str | None = None
+    response_language: str | None = Field(default="auto", max_length=20)
 
 
 class CommitAssistantRequest(BaseModel):
