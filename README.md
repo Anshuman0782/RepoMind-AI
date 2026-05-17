@@ -52,6 +52,8 @@ copy .env.example .env
 uv run uvicorn app.main:app --reload --port 8000
 ```
 
+RepoMind stores imported repositories in the project-level `data/` folder so Uvicorn reload does not restart the backend while a repo is being cloned or indexed.
+
 If `uv` reports a cache error on Windows, use a custom cache path:
 
 ```powershell

@@ -38,6 +38,7 @@ from app.services.language_utils import (
 )
 from app.services.llm_provider import LLMProviderError, generate_answer
 from app.services.planner_service import plan_change, requested_file_intent
+from app.services.repo_service import project_status_error
 from app.services.review_service import review_changes
 from app.services.vector_store import search_chunks
 
@@ -201,6 +202,15 @@ async def create_chat_session(project_id: str, title: str | None = None) -> dict
     return chat
 
 
+async def ensure_project_ready_for_chat(project_id: str) -> None:
+    project = await db.projects.find_one({"_id": project_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    error = project_status_error(project)
+    if error:
+        raise HTTPException(status_code=409, detail=error)
+
+
 @router.post("/projects/{project_id}/chats", response_model=ChatSessionResponse)
 async def create_chat_session_endpoint(
     project_id: str, payload: CreateChatSessionRequest
@@ -274,6 +284,7 @@ async def chat(payload: ChatRequest) -> ChatResponse:
     )
     if not chat_session:
         raise HTTPException(status_code=404, detail="Chat not found")
+    await ensure_project_ready_for_chat(payload.project_id)
 
     routed_agent = route_chat_agent(payload.message)
     proposed_operations = None
@@ -401,6 +412,7 @@ async def investigate(payload: InvestigationRequest) -> ChatResponse:
     )
     if not chat_session:
         raise HTTPException(status_code=404, detail="Chat not found")
+    await ensure_project_ready_for_chat(payload.project_id)
 
     answer, sources = await investigate_codebase(
         payload.project_id,
@@ -440,6 +452,7 @@ async def create_change_plan(payload: ChangePlanRequest) -> ChatResponse:
     )
     if not chat_session:
         raise HTTPException(status_code=404, detail="Chat not found")
+    await ensure_project_ready_for_chat(payload.project_id)
 
     if is_documentation_request(payload.message):
         if is_readme_file_request(payload.message):
@@ -490,6 +503,7 @@ async def create_code_review(payload: CodeReviewRequest) -> ChatResponse:
     )
     if not chat_session:
         raise HTTPException(status_code=404, detail="Chat not found")
+    await ensure_project_ready_for_chat(payload.project_id)
 
     try:
         answer, sources = await review_changes(

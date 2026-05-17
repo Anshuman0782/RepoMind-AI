@@ -3,13 +3,16 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
 class Settings(BaseSettings):
     app_name: str = "RepoMind AI"
     app_env: str = "development"
     mongodb_uri: str = "mongodb://localhost:27017"
     mongodb_db: str = "repomind"
-    repos_dir: Path = Path("./data/repos")
-    chroma_dir: Path = Path("./data/chroma")
+    repos_dir: Path = PROJECT_ROOT / "data" / "repos"
+    chroma_dir: Path = PROJECT_ROOT / "data" / "chroma"
     embedding_provider: str = "hash"
     ollama_embedding_model: str = "nomic-embed-text"
     llm_provider: str = "ollama"

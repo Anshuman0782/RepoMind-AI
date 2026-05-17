@@ -59,6 +59,18 @@ export function ChatView({
   onSkipReview,
   onCreateCommit,
 }: ChatViewProps) {
+  const projectStatus = selectedProject?.status ?? "";
+  const isProjectBusy = projectStatus === "importing" || projectStatus === "indexing";
+  const isProjectFailed = projectStatus.endsWith("_failed") || projectStatus.endsWith("_interrupted");
+  const canAsk = Boolean(selectedProjectId) && !isProjectBusy && !isProjectFailed;
+  const placeholder = !selectedProject
+    ? "Select a project first"
+    : isProjectBusy
+      ? "RepoMind is indexing this repo..."
+      : isProjectFailed
+        ? "Fix or re-index this repo before asking"
+        : "Ask about the selected repo...";
+
   return (
     <>
       <div className="min-h-0 flex-1 overflow-y-auto py-4 pr-1 sm:py-6">
@@ -190,7 +202,13 @@ export function ChatView({
 
       <form className="border-t border-line pt-3 sm:pt-4" onSubmit={onChat}>
         <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-zinc-500">Ask in any language. Auto replies in the same language.</p>
+          <p className="text-xs text-zinc-500">
+            {isProjectBusy
+              ? "Indexing is still running. Chat unlocks when the project is indexed."
+              : isProjectFailed
+                ? "This project needs a fresh import or re-index before chat can answer."
+                : "Ask in any language. Auto replies in the same language."}
+          </p>
           <label className="flex items-center gap-2 text-xs font-medium text-zinc-600">
             Reply language
             <select
@@ -220,14 +238,15 @@ export function ChatView({
         <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
           <textarea
             className="min-h-16 flex-1 resize-none rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent sm:min-h-20 sm:text-base"
-            placeholder={selectedProject ? "Ask about the selected repo..." : "Select a project first"}
+            placeholder={placeholder}
             value={message}
             onChange={(event) => setMessage(event.target.value)}
+            disabled={!canAsk || busy}
             required
           />
           <button
             className="flex h-12 items-center justify-center gap-2 rounded-md bg-ink px-5 text-sm font-medium text-white transition-all duration-150 active:scale-[0.97] disabled:opacity-60 sm:h-20"
-            disabled={busy || !selectedProjectId}
+            disabled={busy || !canAsk}
             type="submit"
           >
             {pendingAction === "ask" ? (
