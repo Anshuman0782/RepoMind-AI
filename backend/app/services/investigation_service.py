@@ -1,8 +1,12 @@
+import json
 import re
+import tomllib
+import xml.etree.ElementTree as ET
 
 from app.models.schemas import SourceChunk
 from app.services.codebase_tools import list_files, read_file, search_code
 from app.services.context_utils import full_file_chunks_for_message, merge_context_chunks
+from app.services.file_scanner import TEXT_EXTENSIONS, TEXT_FILE_NAMES
 from app.services.language_utils import (
     MULTILINGUAL_BUG_TERMS,
     contains_any_term,
@@ -15,6 +19,10 @@ from app.services.vector_store import search_chunks
 
 MAX_EVIDENCE_CHUNKS = 4
 MAX_KEYWORD_RESULTS = 4
+MAX_BUG_EVIDENCE_CHUNKS = 16
+MAX_BUG_SCAN_FILES = 120
+MAX_DIRECT_BUG_ISSUES = 20
+BUG_CONTEXT_RADIUS = 3
 BUG_TERMS = (
     "bug",
     "error",
@@ -84,10 +92,15 @@ async def collect_investigation_evidence(project_id: str, message: str) -> list[
         merged = merge_context_chunks(
             merged,
             await _syntax_bug_chunks(project_id),
-            limit=MAX_EVIDENCE_CHUNKS + MAX_KEYWORD_RESULTS,
+            limit=MAX_BUG_EVIDENCE_CHUNKS,
         )
 
-    return _dedupe_chunks(merged)[: MAX_EVIDENCE_CHUNKS + MAX_KEYWORD_RESULTS]
+    limit = (
+        MAX_BUG_EVIDENCE_CHUNKS
+        if _effective_mode(message, "navigator") == "bug"
+        else MAX_EVIDENCE_CHUNKS + MAX_KEYWORD_RESULTS
+    )
+    return _dedupe_chunks(merged)[:limit]
 
 
 async def investigate_codebase(
@@ -138,102 +151,112 @@ async def _syntax_bug_chunks(project_id: str) -> list[dict]:
     except Exception:
         return chunks
 
-    for file in files:
+    scanned = 0
+    for file in _prioritized_bug_files(files):
         path = file["path"]
-        if not path.lower().endswith((".html", ".js", ".jsx", ".ts", ".tsx")):
-            continue
         try:
             content = await read_file(project_id, path)
         except (FileNotFoundError, ValueError):
             continue
-        if _has_known_js_bug(content["content"]):
-            chunks.append(
-                {
-                    "file_path": content["path"],
-                    "start_line": 1,
-                    "end_line": content["line_count"],
-                    "content": content["content"],
-                }
-            )
-        if len(chunks) >= 3:
+
+        scanned += 1
+        for issue in _detect_bug_issues(
+            content["path"],
+            content["content"],
+            start_line=1,
+            line_count=content["line_count"],
+        ):
+            chunks.append(_context_chunk_for_issue(content, issue))
+            if len(chunks) >= MAX_BUG_EVIDENCE_CHUNKS:
+                return _dedupe_chunks(chunks)
+
+        if scanned >= MAX_BUG_SCAN_FILES:
             break
-    return chunks
+    return _dedupe_chunks(chunks)
+
+
+def _prioritized_bug_files(files: list[dict]) -> list[dict]:
+    preferred_names = {
+        "index.html",
+        "main.js",
+        "app.js",
+        "script.js",
+        "page.tsx",
+        "app.tsx",
+        "main.py",
+        "app.py",
+    }
+
+    candidates = [file for file in files if _is_text_bug_candidate(file["path"])]
+    return sorted(
+        candidates,
+        key=lambda file: (
+            PathRank.low_priority(file["path"]),
+            PathRank.type_priority(file["path"]),
+            PathRank.name_priority(file["name"], preferred_names),
+            file["path"].lower(),
+        ),
+    )
+
+
+def _is_text_bug_candidate(path: str) -> bool:
+    lowered_name = path.rsplit("/", 1)[-1].lower()
+    suffix = f".{lowered_name.rsplit('.', 1)[-1]}" if "." in lowered_name else ""
+    if lowered_name in {name.lower() for name in TEXT_FILE_NAMES}:
+        return True
+    if suffix in TEXT_EXTENSIONS:
+        return True
+    return any(lowered_name.endswith(extension) for extension in TEXT_EXTENSIONS if extension.count(".") > 1)
+
+
+class PathRank:
+    @staticmethod
+    def low_priority(path: str) -> int:
+        lowered = path.lower()
+        if lowered.endswith((".test.js", ".test.ts", ".test.tsx", ".spec.js", ".spec.ts", ".spec.tsx")):
+            return 1
+        return 0
+
+    @staticmethod
+    def name_priority(name: str, preferred_names: set[str]) -> int:
+        return 0 if name.lower() in preferred_names else 1
+
+    @staticmethod
+    def type_priority(path: str) -> int:
+        lowered = path.lower()
+        if lowered.endswith((".html", ".js", ".jsx", ".mjs", ".ts", ".tsx", ".vue", ".svelte", ".py")):
+            return 0
+        if lowered.endswith((".json", ".jsonc", ".toml", ".xml", ".yml", ".yaml")):
+            return 1
+        if lowered.endswith((".css", ".scss", ".sass", ".less", ".sh", ".ps1", ".sql")):
+            return 2
+        if lowered.endswith((".md", ".mdx", ".txt", ".log", ".lock", ".csv", ".tsv")):
+            return 4
+        return 3
 
 
 def _has_known_js_bug(content: str) -> bool:
-    return bool(
-        re.search(r"function\s*\(\s*\)\s*\{", content)
-        or re.search(r"=\s*\.\s*getElementById\s*\(", content)
-        or _onclick_calls_without_matching_functions(content)
-        or re.search(r"^\s*tr\s*\{", content, flags=re.MULTILINE)
-        or re.search(r"Math\.floor\s*\(\s*\.random\s*\(", content)
-        or "math.floor" in content.lower()
-    )
+    return bool(_detect_bug_issues("unknown.js", content, start_line=1, line_count=len(content.splitlines())))
 
 
 def _direct_bug_answer(chunks: list[dict], message: str, response_language: str | None) -> str | None:
     issues = []
 
     for chunk in chunks:
-        content = chunk["content"]
-        onclick_calls = _onclick_function_calls(content)
-        declared_functions = _declared_functions(content)
-        anonymous_function_lines = []
-
-        for offset, line in enumerate(content.splitlines()):
-            stripped = line.strip()
-            line_number = chunk["start_line"] + offset
-            location = f"{chunk['file_path']}:{line_number}"
-
-            if re.search(r"=\s*\.\s*getElementById\s*\(", stripped):
-                issues.append(
-                    {
-                        "location": location,
-                        "kind": "missing_document",
-                        "evidence": f"`{stripped}`",
-                        "fix": "Change it to `const display = document.getElementById(\"display\");`.",
-                    }
-                )
-            if re.search(r"function\s*\(\s*\)\s*\{", stripped):
-                anonymous_function_lines.append(line_number)
-            if re.search(r"^tr\s*\{", stripped):
-                issues.append(
-                    {
-                        "location": location,
-                        "kind": "bad_try",
-                        "evidence": f"`{stripped}`",
-                        "fix": "Change `tr{` to `try {`.",
-                    }
-                )
-            if re.search(r"addEventListener\s*\(.*\(\)\s*\{", stripped):
-                issues.append(
-                    {
-                        "location": location,
-                        "kind": "bad_click_handler",
-                        "evidence": f"`{stripped}`",
-                        "fix": "Change the handler to `button.addEventListener(\"click\", () => {`.",
-                    }
-                )
-            if "math.floor" in stripped:
-                issues.append(
-                    {
-                        "location": location,
-                        "kind": "bad_math_case",
-                        "evidence": f"`{stripped}`",
-                        "fix": "Use `Math.floor(...)` with an uppercase `M`.",
-                    }
-                )
+        if chunk.get("detected_issues"):
+            issues.extend(chunk["detected_issues"])
+            continue
 
         issues.extend(
-            _missing_or_misspelled_function_issues(
+            _detect_bug_issues(
                 chunk["file_path"],
-                onclick_calls,
-                declared_functions,
-                anonymous_function_lines,
+                chunk["content"],
+                start_line=chunk["start_line"],
+                line_count=chunk["end_line"] - chunk["start_line"] + 1,
             )
         )
 
-    deduped_issues = _dedupe_issues(issues)
+    deduped_issues = _dedupe_issues(issues)[:MAX_DIRECT_BUG_ISSUES]
     if not deduped_issues:
         return None
 
@@ -251,11 +274,297 @@ def _direct_bug_answer(chunks: list[dict], message: str, response_language: str 
     )
 
 
+def _detect_bug_issues(
+    file_path: str,
+    content: str,
+    start_line: int,
+    line_count: int,
+) -> list[dict]:
+    issues = []
+    lowered_path = file_path.lower()
+    lines = content.splitlines()
+    full_file = start_line == 1 and line_count >= len(lines)
+
+    for offset, line in enumerate(lines):
+        stripped = line.strip()
+        line_number = start_line + offset
+        location = f"{file_path}:{line_number}"
+
+        if stripped.startswith(("<<<<<<<", "=======", ">>>>>>>")):
+            issues.append(
+                {
+                    "location": location,
+                    "kind": "merge_conflict",
+                    "evidence": f"`{stripped}`",
+                    "fix": "Resolve the conflict marker and keep only the intended code.",
+                    "line_number": line_number,
+                }
+            )
+        if re.search(r"=\s*\.\s*getElementById\s*\(", stripped):
+            issues.append(
+                {
+                    "location": location,
+                    "kind": "missing_document",
+                    "evidence": f"`{stripped}`",
+                    "fix": "Change it to `const display = document.getElementById(\"display\");`.",
+                    "line_number": line_number,
+                }
+            )
+        if re.search(r"^tr\s*\{", stripped):
+            issues.append(
+                {
+                    "location": location,
+                    "kind": "bad_try",
+                    "evidence": f"`{stripped}`",
+                    "fix": "Change `tr{` to `try {`.",
+                    "line_number": line_number,
+                }
+            )
+        if re.search(r"addEventListener\s*\(.*\(\)\s*\{", stripped):
+            issues.append(
+                {
+                    "location": location,
+                    "kind": "bad_click_handler",
+                    "evidence": f"`{stripped}`",
+                    "fix": "Change the handler to `button.addEventListener(\"click\", () => {`.",
+                    "line_number": line_number,
+                }
+            )
+        if re.search(r"\bmath\.(floor|random|ceil|round|max|min|abs)\b", stripped):
+            issues.append(
+                {
+                    "location": location,
+                    "kind": "bad_math_case",
+                    "evidence": f"`{stripped}`",
+                    "fix": "Use the JavaScript `Math` object with an uppercase `M`.",
+                    "line_number": line_number,
+                }
+            )
+        if ".random(" in stripped and "Math.random(" not in stripped:
+            issues.append(
+                {
+                    "location": location,
+                    "kind": "bad_random_call",
+                    "evidence": f"`{stripped}`",
+                    "fix": "Use `Math.random()` before applying `Math.floor(...)`.",
+                    "line_number": line_number,
+                }
+            )
+        if re.search(r"(?<![A-Za-z0-9_$])document\.querySelector(All)?\s*\(\s*\)", stripped):
+            issues.append(
+                {
+                    "location": location,
+                    "kind": "empty_selector",
+                    "evidence": f"`{stripped}`",
+                    "fix": "Pass a CSS selector string, for example `document.querySelector(\".item\")`.",
+                    "line_number": line_number,
+                }
+            )
+
+    if lowered_path.endswith((".html", ".js", ".jsx", ".mjs", ".ts", ".tsx", ".vue", ".svelte")):
+        issues.extend(_javascript_cross_reference_issues(file_path, content, start_line, full_file))
+
+    if full_file and lowered_path.endswith(".py"):
+        issues.extend(_python_syntax_issues(file_path, content))
+
+    if full_file and lowered_path.endswith((".json", ".jsonc")):
+        issues.extend(_json_syntax_issues(file_path, content))
+
+    if full_file and lowered_path.endswith(".toml"):
+        issues.extend(_toml_syntax_issues(file_path, content))
+
+    if full_file and lowered_path.endswith((".xml", ".html")):
+        issues.extend(_xml_syntax_issues(file_path, content))
+
+    if full_file:
+        issues.extend(_balanced_delimiter_issues(file_path, content))
+
+    return _dedupe_issues(issues)
+
+
+def _javascript_cross_reference_issues(
+    file_path: str,
+    content: str,
+    start_line: int,
+    full_file: bool,
+) -> list[dict]:
+    onclick_calls = _onclick_function_call_locations(content, start_line)
+    declared_functions = _declared_functions(content)
+    anonymous_function_lines = [
+        start_line + offset
+        for offset, line in enumerate(content.splitlines())
+        if re.search(r"function\s*\(\s*\)\s*\{", line.strip())
+    ]
+    issues = []
+
+    for line_number in anonymous_function_lines:
+        issues.append(
+            {
+                "location": f"{file_path}:{line_number}",
+                "kind": "anonymous_function",
+                "evidence": "`function (){`",
+                "fix": "Give the function a name or convert it to an assigned arrow function.",
+                "line_number": line_number,
+            }
+        )
+
+    if full_file:
+        issues.extend(
+            _missing_or_misspelled_function_issues(
+                file_path,
+                onclick_calls,
+                declared_functions,
+                anonymous_function_lines,
+            )
+        )
+    return issues
+
+
+def _python_syntax_issues(file_path: str, content: str) -> list[dict]:
+    try:
+        compile(content, file_path, "exec")
+    except SyntaxError as exc:
+        line_number = exc.lineno or 1
+        evidence = (exc.text or exc.msg or "Python syntax error").strip()
+        return [
+            {
+                "location": f"{file_path}:{line_number}",
+                "kind": "python_syntax_error",
+                "evidence": f"`{evidence}`",
+                "fix": f"Fix the Python syntax error: {exc.msg}.",
+                "line_number": line_number,
+            }
+        ]
+    return []
+
+
+def _json_syntax_issues(file_path: str, content: str) -> list[dict]:
+    normalized = _strip_jsonc_comments(content) if file_path.lower().endswith(".jsonc") else content
+    try:
+        json.loads(normalized)
+    except json.JSONDecodeError as exc:
+        return [
+            {
+                "location": f"{file_path}:{exc.lineno}",
+                "kind": "json_syntax_error",
+                "evidence": f"`{exc.msg}`",
+                "fix": "Fix the JSON syntax near the cited line.",
+                "line_number": exc.lineno,
+            }
+        ]
+    return []
+
+
+def _toml_syntax_issues(file_path: str, content: str) -> list[dict]:
+    try:
+        tomllib.loads(content)
+    except tomllib.TOMLDecodeError as exc:
+        line_number = _line_number_from_decode_error(str(exc))
+        return [
+            {
+                "location": f"{file_path}:{line_number}",
+                "kind": "toml_syntax_error",
+                "evidence": f"`{exc}`",
+                "fix": "Fix the TOML syntax near the cited line.",
+                "line_number": line_number,
+            }
+        ]
+    return []
+
+
+def _xml_syntax_issues(file_path: str, content: str) -> list[dict]:
+    if not content.strip().startswith("<"):
+        return []
+    try:
+        ET.fromstring(content)
+    except ET.ParseError as exc:
+        line_number = exc.position[0] or 1
+        return [
+            {
+                "location": f"{file_path}:{line_number}",
+                "kind": "xml_syntax_error",
+                "evidence": f"`{exc}`",
+                "fix": "Fix the XML/HTML tag structure near the cited line.",
+                "line_number": line_number,
+            }
+        ]
+    return []
+
+
+def _balanced_delimiter_issues(file_path: str, content: str) -> list[dict]:
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    closing = {value: key for key, value in pairs.items()}
+    stack = []
+    for line_number, line in enumerate(content.splitlines(), start=1):
+        stripped = _strip_strings_and_comments(line)
+        for char in stripped:
+            if char in pairs:
+                stack.append((char, line_number))
+            elif char in closing:
+                if not stack or stack[-1][0] != closing[char]:
+                    return [
+                        {
+                            "location": f"{file_path}:{line_number}",
+                            "kind": "unexpected_closing_delimiter",
+                            "evidence": f"`{char}`",
+                            "fix": "Remove the extra closing delimiter or add the matching opener.",
+                            "line_number": line_number,
+                        }
+                    ]
+                stack.pop()
+    if stack:
+        opener, line_number = stack[-1]
+        return [
+            {
+                "location": f"{file_path}:{line_number}",
+                "kind": "unclosed_delimiter",
+                "evidence": f"`{opener}`",
+                "fix": f"Add the matching `{pairs[opener]}` or remove the unclosed delimiter.",
+                "line_number": line_number,
+            }
+        ]
+    return []
+
+
+def _strip_strings_and_comments(line: str) -> str:
+    line = re.sub(r"(['\"])(?:\\.|(?!\1).)*\1", "", line)
+    return re.sub(r"(//|#).*$", "", line)
+
+
+def _line_number_from_decode_error(error: str) -> int:
+    match = re.search(r"line\s+(\d+)", error)
+    return int(match.group(1)) if match else 1
+
+
+def _strip_jsonc_comments(content: str) -> str:
+    content = re.sub(r"//.*", "", content)
+    return re.sub(r"/\*.*?\*/", "", content, flags=re.DOTALL)
+
+
+def _context_chunk_for_issue(content: dict, issue: dict) -> dict:
+    lines = content["content"].splitlines()
+    line_number = max(1, min(issue.get("line_number", 1), max(1, len(lines))))
+    start = max(1, line_number - BUG_CONTEXT_RADIUS)
+    end = min(len(lines), line_number + BUG_CONTEXT_RADIUS)
+    return {
+        "file_path": content["path"],
+        "start_line": start,
+        "end_line": end,
+        "content": "\n".join(lines[start - 1 : end]),
+        "detected_issues": [issue],
+    }
+
+
 def _onclick_function_calls(content: str) -> set[str]:
-    names = set()
+    return {name for name, _line_number in _onclick_function_call_locations(content, 1)}
+
+
+def _onclick_function_call_locations(content: str, start_line: int) -> set[tuple[str, int]]:
+    calls = set()
     for match in re.finditer(r"onclick=[\"']\s*([A-Za-z_$][\w$]*)\s*\(", content):
-        names.add(match.group(1))
-    return names
+        line_number = start_line + content.count("\n", 0, match.start())
+        calls.add((match.group(1), line_number))
+    return calls
 
 
 def _declared_functions(content: str) -> set[str]:
@@ -268,22 +577,29 @@ def _onclick_calls_without_matching_functions(content: str) -> bool:
 
 def _missing_or_misspelled_function_issues(
     file_path: str,
-    onclick_calls: set[str],
+    onclick_calls: set[str] | set[tuple[str, int]],
     declared_functions: set[str],
     anonymous_function_lines: list[int],
 ) -> list[dict]:
     issues = []
-    missing = sorted(onclick_calls - declared_functions)
-    for called_name in missing:
+    call_locations = _normalize_onclick_calls(onclick_calls)
+    missing = sorted(
+        (called_name, line_number)
+        for called_name, line_number in call_locations
+        if called_name not in declared_functions
+    )
+    for called_name, line_number in missing:
+        location = f"{file_path}:{line_number}" if line_number else file_path
         typo = _closest_typo(called_name, declared_functions)
         if typo:
             issues.append(
                 {
-                    "location": file_path,
+                    "location": location,
                     "kind": "misspelled_function",
                     "called_name": called_name,
                     "declared_name": typo,
                     "fix": f"Rename `function {typo}()` to `function {called_name}()`.",
+                    "line_number": line_number,
                 }
             )
             continue
@@ -295,19 +611,31 @@ def _missing_or_misspelled_function_issues(
                     "kind": "anonymous_clear",
                     "called_name": called_name,
                     "fix": "Change the anonymous clear handler to `function clearDisplay(){ display.value = \"\"; }`.",
+                    "line_number": anonymous_function_lines[0],
                 }
             )
             continue
 
         issues.append(
             {
-                "location": file_path,
+                "location": location,
                 "kind": "missing_function",
                 "called_name": called_name,
                 "fix": f"Define `function {called_name}()` or change the button to call an existing function.",
+                "line_number": line_number,
             }
         )
     return issues
+
+
+def _normalize_onclick_calls(onclick_calls: set[str] | set[tuple[str, int]]) -> set[tuple[str, int]]:
+    normalized = set()
+    for call in onclick_calls:
+        if isinstance(call, tuple):
+            normalized.add(call)
+        else:
+            normalized.add((call, 0))
+    return normalized
 
 
 def _closest_typo(target: str, candidates: set[str]) -> str | None:
@@ -356,23 +684,35 @@ def _dedupe_issues(issues: list[dict]) -> list[dict]:
 BUG_COPY = {
     "en": {
         "problem_heading": "Problem",
-        "problem_text": "The script has JavaScript function or syntax errors that stop the intended button handlers from running.",
+        "problem_text": "I found concrete code errors that can stop the affected files from running correctly.",
         "evidence_heading": "Evidence",
         "fix_heading": "Fix",
         "missing_document": "{location}: {evidence} is missing `document` before `.getElementById(...)`.",
+        "anonymous_function": "{location}: {evidence} declares an anonymous function where a named handler is likely needed.",
         "anonymous_clear": "{location}: `clearDisplay()` is called by a button, but the clear handler is anonymous.",
         "misspelled_function": "{location}: the button calls `{called_name}()`, but the code declares `function {declared_name}()`.",
         "missing_function": "{location}: the button calls `{called_name}()`, but no function with that name is declared.",
         "bad_try": "{location}: {evidence} is invalid JavaScript syntax; it should be `try {{`.",
         "bad_click_handler": "{location}: {evidence} is missing `=>` before the handler body.",
         "bad_math_case": "{location}: {evidence} uses the wrong `Math` casing.",
+        "bad_random_call": "{location}: {evidence} calls `.random()` without the `Math` object.",
+        "empty_selector": "{location}: {evidence} calls `querySelector` without a selector.",
+        "merge_conflict": "{location}: {evidence} is an unresolved merge conflict marker.",
+        "python_syntax_error": "{location}: {evidence} is a Python syntax error.",
+        "json_syntax_error": "{location}: {evidence} is invalid JSON syntax.",
         "fix_missing_document": "Change it to `const display = document.getElementById(\"display\");`.",
+        "fix_anonymous_function": "Give the function a name or assign it to the handler the UI calls.",
         "fix_anonymous_clear": "Change the anonymous clear handler to `function clearDisplay(){ display.value = \"\"; }`.",
         "fix_misspelled_function": "Rename `function {declared_name}()` to `function {called_name}()`.",
         "fix_missing_function": "Define `function {called_name}()` or change the button to call an existing function.",
         "fix_bad_try": "Change `tr{{` to `try {{`.",
         "fix_bad_click_handler": "Add `=>` to the click handler.",
-        "fix_bad_math_case": "Change `math.floor` to `Math.floor`.",
+        "fix_bad_math_case": "Use the JavaScript `Math` object with an uppercase `M`.",
+        "fix_bad_random_call": "Use `Math.random()` before applying `Math.floor(...)`.",
+        "fix_empty_selector": "Pass a CSS selector string to `querySelector`.",
+        "fix_merge_conflict": "Resolve the conflict marker and keep only the intended code.",
+        "fix_python_syntax_error": "Fix the Python syntax error shown at the cited line.",
+        "fix_json_syntax_error": "Fix the JSON syntax near the cited line.",
     },
     "hi": {
         "problem_heading": "समस्या",
@@ -808,19 +1148,20 @@ def _investigation_prompt(
     if mode == "bug":
         task = (
             "Investigate this bug report and answer concisely. Focus only on the bug, "
-            "the exact evidence, and the likely fix. Avoid generic debugging advice, "
+            "all concrete evidence candidates, and the likely fixes. Avoid generic debugging advice, "
             "background explanation, and repeated wording. Do not propose edits as already approved. "
             "Only cite files and line ranges listed in Evidence candidates. Do not invent line numbers, CSS issues, "
-            "source names, UI layout problems, or operations that are not visible in the repository context."
+            "source names, UI layout problems, or operations that are not visible in the repository context. "
+            "When multiple independent issues are visible, list each one instead of collapsing to one bug."
         )
         format_instruction = (
-            "Use this exact format and keep the whole answer under 140 words:\n"
+            "Use this exact format and keep the whole answer under 260 words:\n"
             "**Problem**\n"
-            "One short sentence naming the likely bug.\n\n"
+            "One short sentence naming the likely bug cluster.\n\n"
             "**Evidence**\n"
-            "One or two bullets with file:line and the relevant code detail.\n\n"
+            "Up to six bullets with file:line and the relevant code detail.\n\n"
             "**Fix**\n"
-            "One short sentence or code snippet showing the correction."
+            "Matching bullets showing the corrections."
         )
     else:
         task = (

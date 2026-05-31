@@ -11,6 +11,17 @@ class ProjectResponse(BaseModel):
     name: str
     repo_url: str
     status: str
+    access_mode: str = "read_only"
+    auth_provider: str | None = None
+    github_owner: str | None = None
+    github_repo: str | None = None
+    github_user_login: str | None = None
+    github_permissions: dict = Field(default_factory=dict)
+
+
+class GitHubAuthStartResponse(BaseModel):
+    auth_url: str
+    state: str
 
 
 class FileEntryResponse(BaseModel):

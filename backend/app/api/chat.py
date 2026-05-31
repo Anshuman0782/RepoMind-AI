@@ -38,7 +38,7 @@ from app.services.language_utils import (
 )
 from app.services.llm_provider import LLMProviderError, generate_answer
 from app.services.planner_service import plan_change, requested_file_intent
-from app.services.repo_service import project_status_error
+from app.services.repo_service import project_has_write_access, project_status_error
 from app.services.review_service import review_changes
 from app.services.vector_store import search_chunks
 
@@ -185,6 +185,25 @@ def append_editor_redirect(answer: str, path: str | None) -> str:
     )
 
 
+def read_only_edit_notice() -> str:
+    return (
+        "**Write Access Required**\n"
+        "This imported GitHub repo is currently read-only. You can still use RepoMind for debugging, "
+        "repo Q&A, documentation, investigations, and change planning. To create, edit, delete, commit, "
+        "or push files, connect GitHub and grant write access to this repository."
+    )
+
+
+def suppress_read_only_edit_preview(
+    answer: str,
+    proposed_operations: list[dict] | None,
+    project: dict,
+) -> tuple[str, list[dict] | None, bool]:
+    if not proposed_operations or project_has_write_access(project):
+        return answer, proposed_operations, False
+    return f"{answer}\n\n{read_only_edit_notice()}", None, True
+
+
 async def create_chat_session(project_id: str, title: str | None = None) -> dict:
     project = await db.projects.find_one({"_id": project_id})
     if not project:
@@ -284,6 +303,9 @@ async def chat(payload: ChatRequest) -> ChatResponse:
     )
     if not chat_session:
         raise HTTPException(status_code=404, detail="Chat not found")
+    project = await db.projects.find_one({"_id": payload.project_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     await ensure_project_ready_for_chat(payload.project_id)
 
     routed_agent = route_chat_agent(payload.message)
@@ -363,6 +385,12 @@ async def chat(payload: ChatRequest) -> ChatResponse:
 
         sources = [SourceChunk(**chunk) for chunk in chunks]
 
+    answer, proposed_operations, write_access_required = suppress_read_only_edit_preview(
+        answer,
+        proposed_operations,
+        project,
+    )
+
     now = utc_now()
     await db.chat_messages.insert_one(
         {
@@ -384,8 +412,10 @@ async def chat(payload: ChatRequest) -> ChatResponse:
     await db.chats.update_one({"_id": payload.chat_id}, {"$set": update_fields})
 
     agent_status = "approval_required" if proposed_operations else "completed"
+    if write_access_required:
+        agent_status = "write_access_required"
     if suggested_workspace_mode == "editor" and suggested_action == "edit":
-        agent_status = "redirect_required"
+        agent_status = "write_access_required" if not project_has_write_access(project) else "redirect_required"
     if suggested_workspace_mode == "architecture":
         agent_status = "redirect_required"
     return ChatResponse(
@@ -455,10 +485,18 @@ async def create_change_plan(payload: ChangePlanRequest) -> ChatResponse:
     await ensure_project_ready_for_chat(payload.project_id)
 
     if is_documentation_request(payload.message):
+        project = await db.projects.find_one({"_id": payload.project_id})
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
         if is_readme_file_request(payload.message):
             answer, sources, proposed_operations = await generate_readme_file_change(
                 payload.project_id,
                 message_with_language_instruction(payload.message, payload.response_language),
+            )
+            answer, proposed_operations, _write_access_required = suppress_read_only_edit_preview(
+                answer,
+                proposed_operations,
+                project,
             )
         else:
             answer, sources = await generate_documentation(
@@ -468,9 +506,17 @@ async def create_change_plan(payload: ChangePlanRequest) -> ChatResponse:
             proposed_operations = None
         question = f"Documentation agent: {payload.message}"
     else:
+        project = await db.projects.find_one({"_id": payload.project_id})
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
         answer, sources, proposed_operations = await plan_change(
             payload.project_id,
             message_with_language_instruction(payload.message, payload.response_language),
+        )
+        answer, proposed_operations, _write_access_required = suppress_read_only_edit_preview(
+            answer,
+            proposed_operations,
+            project,
         )
         question = f"Change planner: {payload.message}"
     now = utc_now()

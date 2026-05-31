@@ -56,13 +56,14 @@ const NODE_WIDTH = 170;
 const NODE_HEIGHT = 64;
 
 const LAYERS: Record<LayerKey, { label: string; tone: string; short: string }> = {
-  experience: { label: "Experience", short: "UX", tone: "border-teal-200 bg-teal-50 text-teal-900" },
-  client: { label: "Client logic", short: "UI", tone: "border-sky-200 bg-sky-50 text-sky-900" },
-  edge: { label: "API boundary", short: "API", tone: "border-violet-200 bg-violet-50 text-violet-900" },
-  services: { label: "Agent services", short: "SVC", tone: "border-amber-200 bg-amber-50 text-amber-950" },
-  data: { label: "Data and storage", short: "DATA", tone: "border-emerald-200 bg-emerald-50 text-emerald-950" },
-  project: { label: "Project shell", short: "OPS", tone: "border-zinc-200 bg-zinc-50 text-zinc-800" },
+  experience: { label: "Experience", short: "UX", tone: "border-teal-500/30 bg-teal-950/20 text-teal-300" },
+  client: { label: "Client logic", short: "UI", tone: "border-sky-500/30 bg-sky-950/20 text-sky-300" },
+  edge: { label: "API boundary", short: "API", tone: "border-violet-500/30 bg-violet-950/20 text-violet-300" },
+  services: { label: "Agent services", short: "SVC", tone: "border-amber-500/30 bg-amber-950/20 text-amber-300" },
+  data: { label: "Data and storage", short: "DATA", tone: "border-emerald-500/30 bg-emerald-950/20 text-emerald-300" },
+  project: { label: "Project shell", short: "OPS", tone: "border-zinc-700 bg-zinc-800/40 text-zinc-300" },
 };
+
 
 const FOCUS_LABELS: { mode: FocusMode; label: string }[] = [
   { mode: "overview", label: "Overview" },
@@ -560,9 +561,9 @@ export function ArchitectureView({
   const diagramLayout = getDiagramLayout(visibleNodes);
   const diagramLayoutById = new Map(diagramLayout.map((item) => [item.node.id, item]));
   const renderDiagram = (fullscreen = false) => (
-    <div className={`hidden overflow-auto bg-zinc-950 lg:block ${fullscreen ? "h-full p-6" : "p-4"}`}>
+    <div className={`hidden overflow-auto bg-brand-bg lg:block ${fullscreen ? "h-full p-6" : "p-4"}`}>
       <div
-        className={`relative rounded-md border border-zinc-800 bg-zinc-950 ${fullscreen ? "mx-auto" : ""}`}
+        className={`relative rounded-md border border-line/25 bg-brand-bg ${fullscreen ? "mx-auto" : ""}`}
         style={{ width: DIAGRAM_WIDTH, height: DIAGRAM_HEIGHT }}
       >
         <svg
@@ -580,7 +581,7 @@ export function ArchitectureView({
               markerHeight="6"
               orient="auto-start-reverse"
             >
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#9ca3af" />
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b5cf6" />
             </marker>
           </defs>
           {visibleConnections.map((connection) => {
@@ -597,19 +598,19 @@ export function ArchitectureView({
             const labelX = (startX + endX) / 2;
             const labelY = (startY + endY) / 2 - 8;
             return (
-              <g key={`${connection.from}-${connection.to}`}>
+               <g key={`${connection.from}-${connection.to}`}>
                 <path
                   d={`M ${startX} ${startY} C ${startX + bend} ${startY}, ${endX - bend} ${endY}, ${endX} ${endY}`}
                   fill="none"
-                  stroke="#9ca3af"
-                  strokeWidth="1.4"
+                  stroke="rgba(139, 92, 246, 0.35)"
+                  strokeWidth="1.6"
                   markerEnd={`url(#${fullscreen ? "architecture-arrow-fullscreen" : "architecture-arrow"})`}
                 />
                 <text
                   x={labelX}
                   y={labelY}
                   textAnchor="middle"
-                  className="fill-zinc-400 text-[11px]"
+                  className="fill-textMuted font-mono text-[9px] uppercase tracking-wider font-bold"
                 >
                   {connection.label}
                 </text>
@@ -617,7 +618,7 @@ export function ArchitectureView({
             );
           })}
         </svg>
-
+ 
         {diagramLayout.map(({ node, x, y }) => {
           const Icon = node.icon;
           const selected = selectedNode?.id === node.id;
@@ -625,21 +626,21 @@ export function ArchitectureView({
             <button
               key={node.id}
               type="button"
-              className={`absolute rounded-sm border px-4 py-3 text-left shadow-sm transition hover:border-teal-300 hover:bg-zinc-800 ${
-                selected ? "border-teal-300 bg-zinc-800 ring-1 ring-teal-300" : "border-zinc-700 bg-zinc-900"
+              className={`absolute rounded-xl border px-4 py-3 text-left shadow-lg transition-all duration-200 hover:border-accent hover:bg-line/20 ${
+                selected ? "border-accent bg-accent-dim ring-2 ring-accent/30 shadow-lg shadow-accent/10" : "border-line/25 bg-panel hover:border-accent"
               }`}
               style={{ left: x, top: y, width: NODE_WIDTH, minHeight: NODE_HEIGHT }}
               onClick={() => setSelectedNodeId(node.id)}
             >
               <span className="flex items-center gap-2">
-                <Icon className={selected ? "h-4 w-4 text-teal-300" : "h-4 w-4 text-zinc-400"} />
-                <span className="min-w-0 flex-1 truncate text-xs font-semibold text-white">
+                <Icon className={selected ? "h-4 w-4 text-accent" : "h-4 w-4 text-textSecondary"} />
+                <span className="min-w-0 flex-1 truncate text-xs font-semibold text-ink">
                   {node.title}
                 </span>
               </span>
-              <span className="mt-2 flex items-center justify-between gap-2 text-[11px] text-zinc-400">
+              <span className="mt-2 flex items-center justify-between gap-2 text-[10px] text-textSecondary font-medium">
                 <span className="truncate">{LAYERS[node.layer].label}</span>
-                <span>{node.paths.length} files</span>
+                <span className="text-textMuted font-bold">{node.paths.length} files</span>
               </span>
             </button>
           );
@@ -647,120 +648,127 @@ export function ArchitectureView({
       </div>
     </div>
   );
+
   const renderInspector = (compact = false) => (
     <>
       {!compact ? (
-        <div className="rounded-md border border-line bg-white p-4">
-          <h3 className="text-sm font-semibold text-ink">Layer legend</h3>
+        <div className="rounded-xl border border-line/20 bg-brand-sidebar/40 p-4">
+          <h3 className="text-sm font-semibold text-textPrimary">Layer legend</h3>
           <div className="mt-3 grid gap-2">
             {Object.entries(LAYERS).map(([key, layer]) => {
               const count = visibleNodes.filter((node) => node.layer === key).length;
               return (
-                <div key={key} className="flex items-center justify-between rounded-md border border-line px-3 py-2 text-xs">
+                <div key={key} className="flex items-center justify-between rounded-lg border border-line/10 px-3 py-2 text-xs">
                   <span className={`rounded border px-2 py-1 font-semibold ${layer.tone}`}>{layer.short}</span>
-                  <span className="min-w-0 flex-1 truncate px-3 text-zinc-700">{layer.label}</span>
-                  <span className="text-zinc-500">{count}</span>
+                  <span className="min-w-0 flex-1 truncate px-3 text-textSecondary font-medium">{layer.label}</span>
+                  <span className="text-textMuted font-bold">{count}</span>
                 </div>
               );
             })}
           </div>
         </div>
       ) : null}
-
-      <div className="min-h-0 flex-1 rounded-md border border-line bg-white">
+ 
+      <div className="min-h-0 flex-1 rounded-xl border border-line/20 bg-brand-sidebar/40 flex flex-col">
         {selectedNode ? (
           <>
-            <div className="border-b border-line p-4">
+            <div className="border-b border-line/15 p-4 bg-brand-sidebar/20">
               <div className="flex items-start gap-3">
-                <span className={`rounded-md border p-2 ${LAYERS[selectedNode.layer].tone}`}>
+                <span className={`rounded-lg border p-2 ${LAYERS[selectedNode.layer].tone}`}>
                   <selectedNode.icon className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
-                  <h3 className="truncate text-sm font-semibold text-ink">{selectedNode.title}</h3>
-                  <p className="mt-1 text-xs leading-5 text-zinc-500">{selectedNode.description}</p>
+                  <h3 className="truncate text-sm font-bold text-textPrimary">{selectedNode.title}</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-textSecondary">{selectedNode.description}</p>
                 </div>
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-3 flex flex-wrap gap-1.5">
                 {selectedNode.signals.map((signal) => (
-                  <span key={signal} className="rounded border border-line bg-panel px-2 py-1 text-xs text-zinc-600">
+                  <span key={signal} className="rounded border border-line/15 bg-brand-bg px-2 py-0.5 text-[10px] font-mono text-textSecondary">
                     {signal}
                   </span>
                 ))}
               </div>
             </div>
-            <div className="p-4">
-              <div className="mb-2 flex items-center justify-between text-xs text-zinc-500">
-                <span className="flex items-center gap-2 font-medium text-zinc-600">
-                  <Files className="h-4 w-4" />
+            <div className="p-4 flex-1 flex flex-col min-h-0">
+              <div className="mb-2.5 flex items-center justify-between text-xs text-textSecondary">
+                <span className="flex items-center gap-2 font-bold text-textPrimary">
+                  <Files className="h-4 w-4 text-accent" />
                   Files
                 </span>
-                <span>{formatBytes(selectedNodeSize)}</span>
+                <span className="font-mono text-[10px] text-textMuted">{formatBytes(selectedNodeSize)}</span>
               </div>
-              <div className={compact ? "max-h-[calc(100vh-300px)] overflow-y-auto rounded-md border border-line" : "max-h-[360px] overflow-y-auto rounded-md border border-line"}>
+              <div className={`overflow-y-auto rounded-lg border border-line/15 bg-brand-bg divide-y divide-line/15 ${
+                compact ? "max-h-[calc(100vh-300px)]" : "max-h-[300px]"
+              }`}>
                 {selectedNode.paths.map((path) => (
                   <button
                     key={path}
                     type="button"
-                    className="block w-full border-b border-line px-3 py-2 text-left text-xs last:border-b-0 hover:bg-panel"
+                    className="block w-full px-3 py-2 text-left text-xs text-textSecondary hover:bg-line/15 hover:text-ink transition font-mono truncate"
                     onClick={() => onOpenFile(path)}
                   >
-                    <span className="block truncate font-medium text-ink">{path}</span>
+                    📄 {path}
                   </button>
                 ))}
               </div>
             </div>
           </>
         ) : (
-          <div className="p-4 text-sm text-zinc-500">Pick a node to inspect its source files.</div>
+          <div className="p-6 text-xs text-textMuted italic text-center">Pick a map node to inspect its files.</div>
         )}
       </div>
     </>
   );
 
+
   return (
     <div className="min-h-0 flex-1 overflow-y-auto py-4">
       <div className="flex flex-col gap-4">
-        <div className="rounded-md border border-line bg-white p-4">
+        {/* Info panel */}
+        <div className="rounded-xl border border-line/20 bg-brand-sidebar/40 p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <div className="flex items-center gap-2 text-sm font-semibold text-ink">
-                <Network className="h-4 w-4 text-accent" />
-                Architecture map
+              <div className="flex items-center gap-2 text-sm font-semibold text-textPrimary">
+                <Network className="h-4 w-4 text-accent animate-pulse" />
+                Architecture Map
               </div>
-              <p className="mt-1 text-sm leading-6 text-zinc-600">
+              <p className="mt-1 text-xs leading-relaxed text-textSecondary">
                 {selectedProject
-                  ? `${selectedProject.name} mapped from the current file index.`
-                  : "Select a project to build a live architecture map from its files."}
+                  ? `Dependency mapping parsed from the current files of "${selectedProject.name}".`
+                  : "Select a workspace to map files into layers."}
               </p>
             </div>
             <div className="grid grid-cols-3 gap-2 text-xs sm:min-w-80">
-              <div className="rounded-md border border-line bg-panel px-3 py-2">
-                <span className="block text-zinc-500">Files</span>
-                <span className="text-sm font-semibold text-ink">{isLoading ? "..." : files.length}</span>
+              <div className="rounded-lg border border-line/15 bg-brand-bg px-3 py-2">
+                <span className="block text-[10px] text-textMuted font-bold uppercase tracking-wider">Files</span>
+                <span className="text-sm font-bold text-textPrimary">{isLoading ? "..." : files.length}</span>
               </div>
-              <div className="rounded-md border border-line bg-panel px-3 py-2">
-                <span className="block text-zinc-500">Frontend</span>
-                <span className="text-sm font-semibold text-ink">{frontendCount}</span>
+              <div className="rounded-lg border border-line/15 bg-brand-bg px-3 py-2">
+                <span className="block text-[10px] text-textMuted font-bold uppercase tracking-wider">Frontend</span>
+                <span className="text-sm font-bold text-textPrimary">{frontendCount}</span>
               </div>
-              <div className="rounded-md border border-line bg-panel px-3 py-2">
-                <span className="block text-zinc-500">Backend</span>
-                <span className="text-sm font-semibold text-ink">{backendCount}</span>
+              <div className="rounded-lg border border-line/15 bg-brand-bg px-3 py-2">
+                <span className="block text-[10px] text-textMuted font-bold uppercase tracking-wider">Backend</span>
+                <span className="text-sm font-bold text-textPrimary">{backendCount}</span>
               </div>
             </div>
           </div>
-
-          <div className="mt-4 flex flex-col gap-3 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2 text-xs font-medium text-zinc-500">
-              <SlidersHorizontal className="h-4 w-4" />
-              Focus
+ 
+          <div className="mt-4 flex flex-col gap-3 border-t border-line/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2 text-xs font-semibold text-textSecondary">
+              <SlidersHorizontal className="h-4 w-4 text-accent" />
+              Focus Layer
             </div>
-            <div className="grid rounded-md border border-line bg-panel p-1 text-sm sm:grid-cols-4">
+            <div className="flex flex-wrap gap-1 rounded-xl border border-line/15 bg-brand-sidebar p-1 text-xs">
               {FOCUS_LABELS.map((item) => (
                 <button
                   key={item.mode}
                   type="button"
-                  className={`rounded px-3 py-2 font-medium transition ${
-                    focusMode === item.mode ? "bg-white text-ink shadow-sm" : "text-zinc-600 hover:text-ink"
+                  className={`rounded-lg px-3.5 py-1.5 font-semibold transition-all ${
+                    focusMode === item.mode
+                      ? "bg-accent text-white shadow-md shadow-accent/20"
+                      : "text-textSecondary hover:text-ink"
                   }`}
                   onClick={() => {
                     setFocusMode(item.mode);
@@ -775,77 +783,82 @@ export function ArchitectureView({
           </div>
         </div>
 
-        <div className="grid min-h-[620px] gap-4 xl:grid-cols-[1fr_340px]">
-          <div className="min-h-[520px] overflow-hidden rounded-md border border-line bg-panel">
+        <div className="grid min-h-[560px] gap-4 xl:grid-cols-[1fr_320px]">
+          {/* Main Visual Map Container */}
+          <div className="min-h-[460px] overflow-hidden rounded-xl border border-line/20 bg-brand-sidebar/10 flex flex-col">
             {selectedProjectId && visibleNodes.length > 0 ? (
               <>
-              <div className="grid gap-3 p-3 lg:hidden">
-                {visibleNodes.map((node) => {
-                  const Icon = node.icon;
-                  const selected = selectedNode?.id === node.id;
-                  return (
-                    <button
-                      key={node.id}
-                      type="button"
-                      className={`rounded-md border bg-white p-3 text-left shadow-sm transition ${
-                        selected ? "border-accent ring-2 ring-teal-100" : "border-line"
-                      }`}
-                      onClick={() => setSelectedNodeId(node.id)}
-                    >
-                      <div className="flex items-start gap-2">
-                        <span className={`rounded-md border p-2 ${LAYERS[node.layer].tone}`}>
-                          <Icon className="h-4 w-4" />
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm font-semibold text-ink">{node.title}</span>
-                          <span className="mt-1 block text-xs leading-4 text-zinc-500">{node.subtitle}</span>
-                        </span>
-                      </div>
-                      <div className="mt-3 flex items-center justify-between text-xs">
-                        <span className={`rounded border px-2 py-1 font-semibold ${LAYERS[node.layer].tone}`}>
-                          {LAYERS[node.layer].short}
-                        </span>
-                        <span className="text-zinc-500">{node.paths.length} files</span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="relative">
-                <button
-                  type="button"
-                  className="absolute right-3 top-3 z-10 hidden rounded-md border border-zinc-700 bg-zinc-900 p-2 text-zinc-300 shadow-sm transition hover:border-teal-300 hover:text-white lg:inline-flex"
-                  onClick={() => setIsFullscreen(true)}
-                  aria-label="Open architecture fullscreen"
-                  title="Fullscreen"
-                >
-                  <Maximize2 className="h-4 w-4" />
-                </button>
-                {renderDiagram()}
-              </div>
+                {/* Mobile list fallback */}
+                <div className="grid gap-2 p-3 lg:hidden overflow-y-auto max-h-[300px]">
+                  {visibleNodes.map((node) => {
+                    const Icon = node.icon;
+                    const selected = selectedNode?.id === node.id;
+                    return (
+                      <button
+                        key={node.id}
+                        type="button"
+                        className={`rounded-xl border p-3 text-left shadow transition-all duration-150 ${
+                          selected ? "border-accent bg-accent-dim ring-2 ring-accent/25" : "border-line/15 bg-panel"
+                        }`}
+                        onClick={() => setSelectedNodeId(node.id)}
+                      >
+                        <div className="flex items-start gap-2">
+                          <span className={`rounded-lg border p-1.5 ${LAYERS[node.layer].tone}`}>
+                            <Icon className="h-4 w-4" />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate text-xs font-bold text-textPrimary">{node.title}</span>
+                            <span className="mt-0.5 block text-[10px] text-textSecondary leading-normal">{node.subtitle}</span>
+                          </span>
+                        </div>
+                        <div className="mt-2.5 flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-textMuted">
+                          <span className={`rounded px-1.5 py-0.5 ${LAYERS[node.layer].tone}`}>
+                            {LAYERS[node.layer].short}
+                          </span>
+                          <span>{node.paths.length} files</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+ 
+                {/* Desktop SVG Map */}
+                <div className="relative flex-1 hidden lg:block">
+                  <button
+                    type="button"
+                    className="absolute right-4 top-4 z-10 rounded-lg border border-line/35 bg-brand-bg p-2.5 text-textSecondary shadow-md hover:border-accent hover:text-ink transition"
+                    onClick={() => setIsFullscreen(true)}
+                    aria-label="Open architecture fullscreen"
+                    title="Fullscreen Mode"
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </button>
+                  {renderDiagram()}
+                </div>
               </>
             ) : (
-              <div className="flex h-full min-h-[520px] items-center justify-center text-center">
-                <div className="max-w-sm px-5">
-                  <p className="text-sm font-medium text-ink">
-                    {isLoading ? "Mapping architecture..." : "Architecture map ready."}
+              <div className="flex-1 flex items-center justify-center text-center p-6 min-h-[400px]">
+                <div className="max-w-sm">
+                  <p className="text-sm font-semibold text-textPrimary">
+                    {isLoading ? "Mapping layers..." : "Architecture Mapper Active"}
                   </p>
-                  <p className="mt-2 text-sm leading-6 text-zinc-500">
+                  <p className="mt-2 text-xs leading-relaxed text-textSecondary">
                     {selectedProjectId
-                      ? "The project file index is still loading or does not contain recognized source files."
-                      : "Select a project first, then this view will draw the codebase layers."}
+                      ? "Files are currently loading, or we couldn't classify any codebase source layers."
+                      : "Load a workspace in the sidebar to build a responsive SVG architecture diagram."}
                   </p>
                 </div>
               </div>
             )}
           </div>
 
+          {/* Map Side Inspector */}
           <aside className="flex min-h-0 flex-col gap-4">
             {renderInspector()}
           </aside>
         </div>
       </div>
+
       {isFullscreen ? (
         <div className="fixed inset-0 z-[9999] bg-zinc-950">
           <div className="flex h-full min-h-0 flex-col">

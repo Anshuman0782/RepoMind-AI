@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from app.core.database import db
 from app.services.file_scanner import IGNORED_DIRS, IGNORED_FILES, is_text_file_path
-from app.services.repo_service import get_project_path
+from app.services.repo_service import ensure_project_write_access, get_project_path
 
 
 MAX_EDIT_FILE_BYTES = 500_000
@@ -73,6 +73,7 @@ def _operation_diff(relative_path: str, old_content: str, new_content: str) -> s
 
 
 async def create_edit_change_set(project_id: str, operations: list[dict]) -> dict:
+    await ensure_project_write_access(project_id)
     root = (await get_project_path(project_id)).resolve()
     prepared_operations = []
     diffs = []
@@ -122,6 +123,7 @@ async def create_edit_change_set(project_id: str, operations: list[dict]) -> dic
 
 
 async def apply_edit_change_set(project_id: str, change_set_id: str) -> dict:
+    await ensure_project_write_access(project_id)
     change_set = await _get_change_set(project_id, change_set_id)
     if change_set["status"] != "pending":
         raise ValueError("Only pending change sets can be applied")
@@ -167,6 +169,7 @@ async def reject_edit_change_set(project_id: str, change_set_id: str) -> dict:
 
 
 async def rollback_edit_change_set(project_id: str, change_set_id: str) -> dict:
+    await ensure_project_write_access(project_id)
     change_set = await _get_change_set(project_id, change_set_id)
     if change_set["status"] != "applied":
         raise ValueError("Only applied change sets can be rolled back")

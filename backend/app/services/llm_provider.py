@@ -11,7 +11,10 @@ If context is insufficient, say what is missing.
 When referencing code, include file paths and line numbers.
 Do not invent files, libraries, or setup steps that are not in the context.
 For JavaScript, remember that Math.floor and Math.random are built-in APIs and do not require external libraries.
-If you provide code, keep it syntactically valid and directly tied to the referenced file."""
+If you provide code, keep it syntactically valid and directly tied to the referenced file.
+When answering in a non-English language, preserve the technical meaning first: translate explanations naturally,
+keep code identifiers and file paths unchanged, and structure the answer with clear headings, concise bullets,
+evidence, and actionable next steps."""
 
 
 class LLMProviderError(Exception):

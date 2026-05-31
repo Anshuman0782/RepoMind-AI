@@ -1,10 +1,79 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  color: #15161a;
-  background: #ffffff;
+  --color-ink: #f3f4f6;
+  --color-panel: #0f111a;
+  --color-line: #1e2235;
+  --color-accent: #8b5cf6;
+  --color-brand-bg: #07080a;
+  --color-brand-card: #0f111a;
+  --color-brand-sidebar: #090a0f;
+  --color-brand-accent: #6d28d9;
+  --color-brand-accent-light: #a78bfa;
+  --color-brand-border: #181b2c;
+  --color-brand-glow: rgba(139, 92, 246, 0.08);
+
+  --color-accent-dim: rgba(139, 92, 246, 0.12);
+  --color-emerald-dim: rgba(16, 185, 129, 0.15);
+  --color-amber-dim: rgba(245, 158, 11, 0.15);
+  --color-rose-dim: rgba(239, 68, 68, 0.15);
+
+  --color-text-primary: #f3f4f6;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted: #71717a;
+
+  --color-glass-panel-bg: rgba(15, 17, 26, 0.7);
+  --color-glass-panel-border: rgba(30, 34, 53, 0.6);
+  --color-glass-hover-bg: rgba(20, 23, 35, 0.9);
+  --color-glass-hover-border: rgba(139, 92, 246, 0.4);
+  --color-glass-hover-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7), 0 0 15px 0 rgba(139, 92, 246, 0.05);
+
+  --scroll-track: #090a0f;
+  --scroll-thumb: #1e2235;
+  --scroll-thumb-hover: #313754;
+
+  color: var(--color-ink);
+  background: var(--color-brand-bg);
+}
+
+.light-theme {
+  --color-ink: #1f2937;
+  --color-panel: #ffffff;
+  --color-line: #d1d5db;
+  --color-accent: #6d28d9;
+  --color-brand-bg: #f9fafb;
+  --color-brand-card: #ffffff;
+  --color-brand-sidebar: #f3f4f6;
+  --color-brand-accent: #4f46e5;
+  --color-brand-accent-light: #818cf8;
+  --color-brand-border: #e5e7eb;
+  --color-brand-glow: rgba(99, 102, 241, 0.08);
+
+  --color-accent-dim: rgba(109, 40, 217, 0.08);
+  --color-emerald-dim: rgba(16, 185, 129, 0.1);
+  --color-amber-dim: rgba(245, 158, 11, 0.1);
+  --color-rose-dim: rgba(239, 68, 68, 0.1);
+
+  --color-text-primary: #1f2937;
+  --color-text-secondary: #4b5563;
+  --color-text-muted: #9ca3af;
+
+  --color-glass-panel-bg: rgba(255, 255, 255, 0.75);
+  --color-glass-panel-border: rgba(209, 213, 219, 0.6);
+  --color-glass-hover-bg: rgba(255, 255, 255, 0.95);
+  --color-glass-hover-border: rgba(109, 40, 217, 0.4);
+  --color-glass-hover-shadow: 0 10px 30px -10px rgba(109, 40, 217, 0.08), 0 0 15px 0 rgba(109, 40, 217, 0.03);
+
+  --scroll-track: #f3f4f6;
+  --scroll-thumb: #d1d5db;
+  --scroll-thumb-hover: #9ca3af;
+
+  color: var(--color-ink);
+  background: var(--color-brand-bg);
 }
 
 * {
@@ -14,16 +83,71 @@
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background-color: var(--color-brand-bg);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Outfit', sans-serif;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scroll-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+}
+
+/* Code layout styling */
+pre, code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
 }
 
 button,
 input,
-textarea {
-  font: inherit;
+textarea,
+select {
+  font-family: inherit;
+}
+
+/* Input highlights */
+input:focus, textarea:focus, select:focus {
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.15);
 }
 
 details:not([open]) > div,
 details:not([open]) > pre {
   display: none;
 }
+
+/* Glassmorphism helpers */
+.glass-panel {
+  background: var(--color-glass-panel-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--color-glass-panel-border);
+}
+
+.glass-card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.glass-card-hover:hover {
+  background: var(--color-glass-hover-bg);
+  border-color: var(--color-glass-hover-border);
+  box-shadow: var(--color-glass-hover-shadow);
+  transform: translateY(-2px);
+}
+

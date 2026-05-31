@@ -5,6 +5,15 @@ export type Project = {
   name: string;
   repo_url: string;
   status: string;
+  access_mode: "read_only" | "write_enabled";
+  auth_provider?: string | null;
+  github_owner?: string | null;
+  github_repo?: string | null;
+  github_user_login?: string | null;
+  github_permissions?: {
+    pull?: boolean;
+    push?: boolean;
+  };
 };
 
 export type ChatSession = {
@@ -92,6 +101,11 @@ export type CreatedCommit = {
   push_summary: string;
 };
 
+export type GitHubAuthStart = {
+  auth_url: string;
+  state: string;
+};
+
 export async function createProject(name: string, repoUrl: string): Promise<Project> {
   const response = await fetch(`${API_BASE_URL}/api/projects`, {
     method: "POST",
@@ -126,6 +140,18 @@ export async function deleteProject(projectId: string): Promise<void> {
 
 export async function reindexProject(projectId: string): Promise<Project> {
   const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/reindex`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+
+  return response.json();
+}
+
+export async function startGitHubProjectAuth(projectId: string): Promise<GitHubAuthStart> {
+  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/github-auth/start`, {
     method: "POST",
   });
 

@@ -22,4 +22,5 @@ export type ChatMessage = {
   suggestedAction?: string | null;
   suggestedPath?: string | null;
   actionChangeSetId?: string;
+  needsWriteAccess?: boolean;
 };

@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     groq_model: str = "llama-3.1-8b-instant"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-1.5-flash"
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    public_backend_url: str = "http://localhost:8001"
+    frontend_url: str = "http://localhost:3000"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

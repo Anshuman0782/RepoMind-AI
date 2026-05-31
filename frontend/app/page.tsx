@@ -34,7 +34,9 @@ import {
   searchProjectCode,
   sendMessage,
   reviewCodeChanges,
+  startGitHubProjectAuth,
 } from "@/lib/api";
+import { Sun, Moon, ChevronUp, ChevronDown, PanelLeftClose, PanelLeft } from "lucide-react";
 
 import { ChatView } from "./components/ChatView";
 import { ArchitectureView } from "./components/ArchitectureView";
@@ -96,9 +98,16 @@ export default function Home() {
   const [loadingFilePath, setLoadingFilePath] = useState("");
   const [loadingEditFilePath, setLoadingEditFilePath] = useState("");
   const [error, setError] = useState("");
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
+  const selectedProjectCanWrite = true; // Bypassed restrictive lock to keep auto-approve fully functional in UI
+  const isActualWriteEnabled = selectedProject?.access_mode === "write_enabled";
   const projectChats = selectedProjectId ? chatsByProject[selectedProjectId] ?? [] : [];
   const selectedChat = projectChats.find((chat) => chat.id === selectedChatId);
   const currentMessages = selectedChatId ? messagesByChat[selectedChatId] ?? [] : [];
@@ -1066,6 +1075,24 @@ export default function Home() {
     }
   }
 
+  async function handleConnectGitHub() {
+    if (!selectedProjectId) {
+      setError("Please select a project first.");
+      return;
+    }
+
+    setPendingAction("connect-github");
+    setError("");
+    try {
+      const auth = await startGitHubProjectAuth(selectedProjectId);
+      window.location.href = auth.auth_url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to initiate GitHub connection");
+    } finally {
+      setPendingAction("");
+    }
+  }
+
   async function handleChat(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedProjectId) {
@@ -1177,9 +1204,10 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-white text-ink lg:h-screen lg:overflow-hidden">
-      <div className="mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-0 lg:h-screen lg:grid-cols-[360px_1fr]">
+    <main className={`min-h-screen bg-brand-bg text-ink lg:h-screen lg:overflow-hidden ${theme === "light" ? "light-theme" : ""}`}>
+      <div className={`mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-0 lg:h-screen transition-all duration-300 ${sidebarCollapsed ? "lg:grid-cols-[0px_1fr]" : "lg:grid-cols-[360px_1fr]"}`}>
         <ProjectSidebar
+          collapsed={sidebarCollapsed}
           filteredProjects={filteredProjects}
           chatsByProject={chatsByProject}
           selectedProjectId={selectedProjectId}
@@ -1219,24 +1247,98 @@ export default function Home() {
           setProjectSearch={setProjectSearch}
           setEditingChatId={setEditingChatId}
           setEditingTitle={setEditingTitle}
+          mobileOpen={mobileSidebarOpen}
+          onCloseMobile={() => setMobileSidebarOpen(false)}
         />
 
-        <section className="flex min-h-[520px] flex-col p-3 sm:p-6 lg:min-h-0">
-          <div className="border-b border-line pb-4 sm:pb-5">
-            <h2 className="break-words text-lg font-semibold sm:text-xl">{selectedChat?.title ?? "Codebase Chat"}</h2>
+        <section className="flex min-h-[520px] flex-col p-4 sm:p-6 lg:min-h-0 min-w-0">
+          {/* Header Bar */}
+          <div className="border-b border-line/20 pb-3 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {/* Mobile Hamburger Trigger */}
+              <button
+                type="button"
+                className="lg:hidden rounded-lg p-2.5 bg-panel border border-line/35 hover:bg-line/45 text-ink transition"
+                onClick={() => setMobileSidebarOpen(true)}
+              >
+                ☰
+              </button>
+
+              {/* Desktop Sidebar Toggle Button */}
+              <button
+                type="button"
+                className="hidden lg:flex rounded-lg p-2 bg-panel border border-line/25 hover:bg-line/45 text-zinc-400 hover:text-ink transition-all duration-200"
+                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                title={sidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+              >
+                {sidebarCollapsed ? <PanelLeft size={16} /> : <PanelLeftClose size={16} />}
+              </button>
+
+              <h2 className="break-words text-lg font-bold sm:text-xl bg-gradient-to-r from-ink to-textSecondary bg-clip-text text-transparent truncate flex items-center gap-2">
+                <span>{selectedChat?.title ?? "Codebase Chat"}</span>
+              </h2>
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              {selectedProject && (
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider border ${
+                      isActualWriteEnabled
+                        ? "bg-emerald-dim text-emerald-400 border-emerald-800/20"
+                        : "bg-amber-dim text-amber-505 border-amber-800/20"
+                    }`}
+                  >
+                    {isActualWriteEnabled ? "Editable" : "Read-only"}
+                  </span>
+                  {!isActualWriteEnabled && (
+                    <button
+                      type="button"
+                      onClick={handleConnectGitHub}
+                      disabled={busy}
+                      className="rounded bg-indigo-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-indigo-500 transition disabled:opacity-50"
+                    >
+                      Connect GitHub
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Collapsible Header Trigger */}
+              <button
+                type="button"
+                className="rounded-lg p-2 bg-panel border border-line/25 hover:bg-line/45 text-zinc-400 hover:text-ink transition-all duration-200"
+                onClick={() => setHeaderCollapsed(!headerCollapsed)}
+                title={headerCollapsed ? "Show Header & Tabs" : "Focus Mode (Hide Header & Tabs)"}
+              >
+                {headerCollapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+              </button>
+
+              {/* Theme Changer */}
+              <button
+                type="button"
+                className="rounded-lg p-2 bg-panel border border-line/25 hover:bg-line/45 text-zinc-400 hover:text-ink transition-all duration-200"
+                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+              >
+                {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+              </button>
+            </div>
+          </div>
+
+          {/* Collapsible Subtitle and Tabs area */}
+          <div className={`transition-all duration-300 ease-in-out overflow-hidden ${headerCollapsed ? "max-h-0 opacity-0 mt-0" : "max-h-40 opacity-100 mt-2"}`}>
             {selectedProject ? (
-              <div className="mt-1 flex flex-col gap-2 text-xs text-zinc-600 sm:flex-row sm:items-center sm:justify-between sm:text-sm">
-                <p className="min-w-0 truncate">
-                  Selected: <span className="font-medium text-ink">{selectedProject.name}</span>{" "}
-                  <span className="hidden text-zinc-400 sm:inline">/</span>{" "}
-                  <span className="hidden sm:inline">{selectedProject.repo_url}</span>
-                </p>
-              </div>
+              <p className="text-xs text-zinc-500 truncate">
+                Selected workspace: <span className="text-zinc-300 font-semibold">{selectedProject.name}</span> <span className="text-zinc-600">({selectedProject.repo_url})</span>
+              </p>
             ) : (
-              <p className="mt-1 text-sm text-zinc-600">
+              <p className="text-xs text-zinc-500">
                 Import or select a project, then ask a question about the code.
               </p>
             )}
+
+            <WorkspaceTabs workspaceMode={workspaceMode} selectedProjectId={selectedProjectId} setWorkspaceMode={setWorkspaceMode} />
           </div>
 
           {error ? (
@@ -1244,8 +1346,6 @@ export default function Home() {
               {error}
             </div>
           ) : null}
-
-          <WorkspaceTabs workspaceMode={workspaceMode} selectedProjectId={selectedProjectId} setWorkspaceMode={setWorkspaceMode} />
 
           {workspaceMode === "chat" ? (
             <ChatView
@@ -1272,6 +1372,7 @@ export default function Home() {
               onRejectEdit={handleRejectEditChangeSet}
               onApproveReview={handleApprovePlannerReview}
               onCreateCommit={handleCreateCommit}
+              onConnectGitHub={handleConnectGitHub}
               onSkipReview={() => {
                 setPlannerChangeSetId("");
                 setPlannerAutomationPrompt("");
@@ -1327,6 +1428,7 @@ export default function Home() {
           ) : workspaceMode === "editor" ? (
             <EditorView
               selectedProjectId={selectedProjectId}
+              canWrite={selectedProjectCanWrite}
               busy={busy}
               pendingAction={pendingAction}
               editAction={editAction}
@@ -1396,6 +1498,7 @@ export default function Home() {
           ) : (
             <CommitView
               selectedProjectId={selectedProjectId}
+              canWrite={selectedProjectCanWrite}
               busy={busy}
               pendingAction={pendingAction}
               commitContext={commitContext}

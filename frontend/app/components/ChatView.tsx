@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, RefObject } from "react";
-import { Check, ExternalLink, Send, X } from "lucide-react";
+import { Check, ExternalLink, Send, X, Globe, Sparkles } from "lucide-react";
 import { CommitAssistantPreview, CreatedCommit, EditChangeSet, Project } from "@/lib/api";
 import { ChatMessage, WorkspaceMode } from "../types";
 import { AnswerContent } from "./AnswerContent";
@@ -31,6 +31,7 @@ type ChatViewProps = {
   onApproveReview: () => void;
   onSkipReview: () => void;
   onCreateCommit: () => void;
+  onConnectGitHub: () => void;
 };
 
 export function ChatView({
@@ -58,47 +59,68 @@ export function ChatView({
   onApproveReview,
   onSkipReview,
   onCreateCommit,
+  onConnectGitHub,
 }: ChatViewProps) {
   const projectStatus = selectedProject?.status ?? "";
   const isProjectBusy = projectStatus === "importing" || projectStatus === "indexing";
   const isProjectFailed = projectStatus.endsWith("_failed") || projectStatus.endsWith("_interrupted");
   const canAsk = Boolean(selectedProjectId) && !isProjectBusy && !isProjectFailed;
   const placeholder = !selectedProject
-    ? "Select a project first"
+    ? "Select a project in the sidebar first..."
     : isProjectBusy
-      ? "RepoMind is indexing this repo..."
+      ? "Please wait, indexing this repository..."
       : isProjectFailed
-        ? "Fix or re-index this repo before asking"
-        : "Ask about the selected repo...";
+        ? "Fix or re-index this repository to unlock chat..."
+        : "Ask anything about the codebase (e.g. 'Where is auth handled?')...";
 
   return (
     <>
-      <div className="min-h-0 flex-1 overflow-y-auto py-4 pr-1 sm:py-6">
+      <div className="min-h-0 flex-1 overflow-y-auto py-4 pr-1 sm:py-6 space-y-6">
         {isLoadingMessages ? (
           <div className="space-y-6">
-            <div className="ml-auto h-20 max-w-[78%] animate-pulse rounded-md bg-zinc-200" />
-            <div className="h-32 max-w-[88%] animate-pulse rounded-md border border-line bg-white" />
+            <div className="ml-auto h-16 max-w-[70%] animate-pulse rounded-2xl bg-zinc-800/40" />
+            <div className="h-32 max-w-[85%] animate-pulse rounded-2xl border border-line/20 bg-panel" />
           </div>
         ) : currentMessages.length > 0 || pendingQuestion ? (
           <div className="space-y-6">
             {currentMessages.map((item) => (
-              <article key={item.id} className="space-y-3">
-                <div className="ml-auto max-w-full rounded-md bg-ink px-3 py-2.5 text-sm text-white sm:max-w-[78%] sm:px-4 sm:py-3 sm:text-base">
-                  <div className="mb-1 text-xs font-medium text-zinc-300">You at {item.createdAt}</div>
-                  <p className="whitespace-pre-wrap leading-6">{item.question}</p>
+              <article key={item.id} className="space-y-4">
+                {/* User Message Bubble */}
+                <div className="ml-auto max-w-full rounded-2xl rounded-tr-none bg-accent border border-accent/25 px-4 py-3.5 text-sm text-white sm:max-w-[78%] shadow-lg shadow-accent/10">
+                  <div className="mb-1 text-[10px] font-bold text-white/70 tracking-wider uppercase">
+                    You • {item.createdAt}
+                  </div>
+                  <p className="whitespace-pre-wrap leading-relaxed text-white">{item.question}</p>
                 </div>
 
-                <div className="max-w-full rounded-md border border-line bg-white px-3 py-2.5 text-sm sm:max-w-[88%] sm:px-4 sm:py-3 sm:text-base">
-                  <div className="mb-2 flex items-center justify-between gap-3 text-xs font-semibold uppercase text-zinc-500">
-                    <span>RepoMind</span>
+                {/* Agent Response Card */}
+                <div className="max-w-full rounded-2xl rounded-tl-none border border-line/20 bg-panel px-4 py-4 text-sm sm:max-w-[88%] shadow-xl shadow-black/30">
+                  <div className="mb-3 flex items-center justify-between gap-3 text-xs font-semibold text-zinc-400">
+                    <div className="flex items-center gap-2">
+                      <img
+                        src="/logo.jpg"
+                        alt="RepoMind"
+                        className="h-5 w-5 rounded-md border border-line/30 object-cover shadow-sm"
+                      />
+                      <span className="font-bold tracking-wide bg-gradient-to-r from-accent to-zinc-200 bg-clip-text text-transparent">
+                        RepoMind AI
+                      </span>
+                      {item.routedAgent && (
+                        <span className="rounded-full bg-zinc-900 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent border border-accent/10">
+                          {item.routedAgent.replace("_", " ")}
+                        </span>
+                      )}
+                    </div>
                     {item.sources.length > 0 ? (
-                      <span className="rounded bg-panel px-2 py-1 normal-case text-zinc-600">
-                        {item.sources.length} sources
+                      <span className="rounded-full bg-brand-bg border border-line/20 px-2.5 py-0.5 text-[10px] text-textSecondary">
+                        📁 {item.sources.length} sources referenced
                       </span>
                     ) : null}
                   </div>
+
                   <AnswerContent answer={item.answer} />
 
+                  {/* Dynamic Action Handlers */}
                   {item.actionChangeSetId && activeEditChangeSet?.id === item.actionChangeSetId ? (
                     <AgentActionPanel
                       changeSet={activeEditChangeSet}
@@ -114,6 +136,10 @@ export function ChatView({
                       onCreateCommit={onCreateCommit}
                       onOpenPlanner={() => setWorkspaceMode("planner")}
                     />
+                  ) : null}
+
+                  {!item.actionChangeSetId && item.needsWriteAccess ? (
+                    <WriteAccessPanel busy={busy} onConnectGitHub={onConnectGitHub} />
                   ) : null}
 
                   {!item.actionChangeSetId &&
@@ -135,26 +161,32 @@ export function ChatView({
                     />
                   ) : null}
 
+                  {/* Collapsible Source References */}
                   {item.sources.length > 0 ? (
-                    <details className="mt-4 rounded-md border border-line bg-panel">
-                      <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-zinc-700">
-                        Source references
+                    <details className="mt-4 rounded-xl border border-line/20 bg-brand-sidebar/40 overflow-hidden">
+                      <summary className="cursor-pointer px-4 py-2.5 text-xs font-semibold text-textSecondary hover:text-accent transition flex items-center gap-1.5">
+                        🔍 Inspect Grounded Evidence
                       </summary>
-                      <div className="grid gap-2 border-t border-line p-2 sm:p-3">
+                      <div className="grid gap-2 border-t border-line/10 p-3 bg-brand-sidebar/20">
                         {item.sources.map((source, index) => (
                           <details
                             key={`${item.id}:${source.file_path}:${source.start_line}:${source.end_line}:${index}`}
-                            className="rounded-md border border-line bg-white"
+                            className="rounded-lg border border-line/15 bg-panel overflow-hidden"
                           >
-                            <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-zinc-700">
-                              <span className="mr-2 rounded bg-panel px-1.5 py-0.5 text-[11px] text-zinc-500">
-                                {index + 1}
-                              </span>
-                              <span className="break-all">
-                                {source.file_path}:{source.start_line}-{source.end_line}
+                            <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-textPrimary hover:text-accent transition flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="rounded bg-accent-dim px-2 py-0.5 text-[10px] font-bold text-accent border border-accent/20">
+                                  {index + 1}
+                                </span>
+                                <span className="break-all font-mono text-[11px] text-textSecondary">
+                                  {source.file_path}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-textMuted font-mono">
+                                Lines {source.start_line} - {source.end_line}
                               </span>
                             </summary>
-                            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-line bg-zinc-950 p-3 text-xs leading-5 text-zinc-100">
+                            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words border-t border-line/10 bg-brand-bg p-3 text-[11px] leading-relaxed text-textPrimary">
                               <code>{source.content}</code>
                             </pre>
                           </details>
@@ -165,17 +197,30 @@ export function ChatView({
                 </div>
               </article>
             ))}
+
+            {/* User Message Typing Loading State */}
             {pendingQuestion ? (
-              <article className="space-y-3">
-                <div className="ml-auto max-w-full rounded-md bg-ink px-3 py-2.5 text-sm text-white sm:max-w-[78%] sm:px-4 sm:py-3 sm:text-base">
-                  <div className="mb-1 text-xs font-medium text-zinc-300">You just now</div>
-                  <p className="whitespace-pre-wrap leading-6">{pendingQuestion}</p>
+              <article className="space-y-4">
+                <div className="ml-auto max-w-full rounded-2xl rounded-tr-none bg-accent border border-accent/25 px-4 py-3.5 text-sm text-white sm:max-w-[78%] shadow-lg shadow-accent/10">
+                  <div className="mb-1 text-[10px] font-bold text-white/70 tracking-wider uppercase">
+                    You just now
+                  </div>
+                  <p className="whitespace-pre-wrap leading-relaxed text-white">{pendingQuestion}</p>
                 </div>
-                <div className="max-w-full rounded-md border border-line bg-white px-3 py-2.5 text-sm sm:max-w-[88%] sm:px-4 sm:py-3">
-                  <div className="mb-2 text-xs font-semibold uppercase text-zinc-500">RepoMind</div>
-                  <div className="flex items-center gap-2 text-sm text-zinc-600">
-                    <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-                    Thinking through the repo context...
+                <div className="max-w-full rounded-2xl rounded-tl-none border border-line/20 bg-panel px-4 py-4 text-sm sm:max-w-[88%] shadow-xl">
+                  <div className="mb-3 flex items-center gap-2 text-xs font-semibold text-textSecondary">
+                    <img
+                      src="/logo.jpg"
+                      alt="RepoMind"
+                      className="h-5 w-5 rounded-md border border-line/30 object-cover shadow-sm animate-pulse"
+                    />
+                    <span className="font-bold tracking-wide text-textPrimary">RepoMind AI</span>
+                  </div>
+                  <div className="flex items-center gap-2.5 text-textSecondary py-1 font-medium">
+                    <span className="h-2 w-2 animate-bounce rounded-full bg-accent" />
+                    <span className="h-2 w-2 animate-bounce rounded-full bg-accent [animation-delay:0.2s]" />
+                    <span className="h-2 w-2 animate-bounce rounded-full bg-accent [animation-delay:0.4s]" />
+                    <span className="text-xs">Reasoning over vector index chunks...</span>
                   </div>
                 </div>
               </article>
@@ -183,40 +228,50 @@ export function ChatView({
             <div ref={messagesEndRef} />
           </div>
         ) : (
-          <div className="flex h-full items-center justify-center text-center">
-            <div className="max-w-sm rounded-md border border-dashed border-line bg-panel px-5 py-6">
-              <p className="text-sm font-medium text-ink">
-                {selectedProject ? (selectedChat ? "This chat is ready." : "No chat selected.") : "No project selected."}
-              </p>
-              <p className="mt-2 text-sm leading-6 text-zinc-500">
+          /* Empty Chat Area */
+          <div className="flex h-full items-center justify-center text-center p-6">
+            <div className="max-w-md rounded-2xl border border-dashed border-line/20 bg-panel p-6 sm:p-8 shadow-xl">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/10 border border-accent/20 text-accent mb-4 shadow-lg shadow-accent/5">
+                <Sparkles size={28} />
+              </div>
+              <h3 className="text-base font-bold text-textPrimary">
                 {selectedProject
                   ? selectedChat
-                    ? "Ask a focused question and RepoMind will answer with source references."
-                    : "Create a chat or ask a question to start one."
-                  : "Import or select a repo to start chatting."}
+                    ? "Interactive Code Chat Ready"
+                    : "No active thread selected"
+                  : "Workspace empty"}
+              </h3>
+              <p className="mt-2 text-xs leading-relaxed text-textSecondary">
+                {selectedProject
+                  ? selectedChat
+                    ? "RepoMind is fully indexed and ready to assist you. Ask any codebase questions, locate files, or prompt for automated edit changesets."
+                    : "Create a new chat thread in the project sidebar to start asking questions."
+                  : "Clone or select a repository from the sidebar workspace to load the AI code mind."}
               </p>
             </div>
           </div>
         )}
       </div>
 
-      <form className="border-t border-line pt-3 sm:pt-4" onSubmit={onChat}>
-        <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-zinc-500">
+      {/* Input Form Footer */}
+      <form className="border-t border-line/10 pt-4" onSubmit={onChat}>
+        <div className="mb-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[11px] font-medium text-textSecondary">
             {isProjectBusy
-              ? "Indexing is still running. Chat unlocks when the project is indexed."
+              ? "Indexing files in ChromaDB..."
               : isProjectFailed
-                ? "This project needs a fresh import or re-index before chat can answer."
-                : "Ask in any language. Auto replies in the same language."}
+                ? "This repository workspace has failed indexing. Please re-index."
+                : "⌨️ Prompt edits naturally. The agent will prepare a diff preview before changes are written."}
           </p>
-          <label className="flex items-center gap-2 text-xs font-medium text-zinc-600">
-            Reply language
+          <label className="flex items-center gap-2 text-xs font-semibold text-textSecondary">
+            <Globe size={13} className="text-accent" />
+            <span>Response Language:</span>
             <select
-              className="rounded-md border border-line bg-white px-2 py-1.5 text-xs outline-none focus:border-accent"
+              className="rounded-lg border border-line/50 bg-brand-bg px-2.5 py-1 text-xs text-ink outline-none focus:border-accent cursor-pointer transition"
               value={responseLanguage}
               onChange={(event) => setResponseLanguage(event.target.value)}
             >
-              <option value="auto">Auto</option>
+              <option value="auto">Automatic (detect)</option>
               <option value="en">English</option>
               <option value="hi">Hindi</option>
               <option value="bn">Bengali</option>
@@ -235,32 +290,65 @@ export function ChatView({
             </select>
           </label>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
+        <div className="flex gap-2">
           <textarea
-            className="min-h-16 flex-1 resize-none rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent sm:min-h-20 sm:text-base"
+            className="min-h-16 flex-1 resize-none rounded-xl border border-line/50 bg-brand-bg px-4 py-3 text-xs text-ink placeholder-textMuted outline-none focus:border-accent transition sm:min-h-20 sm:text-sm"
             placeholder={placeholder}
             value={message}
             onChange={(event) => setMessage(event.target.value)}
             disabled={!canAsk || busy}
             required
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                e.currentTarget.form?.requestSubmit();
+              }
+            }}
           />
           <button
-            className="flex h-12 items-center justify-center gap-2 rounded-md bg-ink px-5 text-sm font-medium text-white transition-all duration-150 active:scale-[0.97] disabled:opacity-60 sm:h-20"
+            className="flex h-16 w-16 items-center justify-center rounded-xl bg-accent text-white shadow-lg shadow-accent/20 transition-all hover:bg-accent-light hover:shadow-accent/40 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed sm:h-20 sm:w-20"
             disabled={busy || !canAsk}
             type="submit"
           >
             {pendingAction === "ask" ? (
-              <>
-                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                Thinking...
-              </>
+              <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
             ) : (
-              <Send size={25} />
+              <Send size={18} />
             )}
           </button>
         </div>
       </form>
     </>
+  );
+}
+
+type WriteAccessPanelProps = {
+  busy: boolean;
+  onConnectGitHub: () => void;
+};
+
+function WriteAccessPanel({ busy, onConnectGitHub }: WriteAccessPanelProps) {
+  return (
+    <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-dim p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-amber-500">🔒 GitHub Write Permissions Required</p>
+          <p className="mt-1 text-xs leading-relaxed text-amber-600">
+            To apply agentic code edits, we need write permissions for this repository.
+            Connect your GitHub account now to continue.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-amber-600 px-4 py-2.5 text-xs font-semibold text-white shadow hover:bg-amber-500 transition disabled:opacity-50"
+          onClick={onConnectGitHub}
+          disabled={busy}
+        >
+          <ExternalLink size={14} />
+          Authorize GitHub Write
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -271,22 +359,22 @@ type ArchitectureRedirectPanelProps = {
 
 function ArchitectureRedirectPanel({ busy, onOpenArchitecture }: ArchitectureRedirectPanelProps) {
   return (
-    <div className="mt-4 rounded-md border border-accent/30 bg-accent/5 p-3">
+    <div className="mt-4 rounded-xl border border-accent/30 bg-accent-dim p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-sm font-semibold text-ink">Architecture map ready</p>
-          <p className="mt-1 text-xs leading-5 text-zinc-600">
-            Open the interactive Architecture workspace to inspect the repository layers and file groups.
+          <p className="text-sm font-semibold text-accent">🗺️ Codebase Map Discovered</p>
+          <p className="mt-1 text-xs leading-relaxed text-textSecondary">
+            The interactive visual representation of the project is compiled and ready for review.
           </p>
         </div>
         <button
           type="button"
-          className="inline-flex items-center justify-center gap-2 rounded-md bg-ink px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-xs font-semibold text-white shadow hover:bg-accent-light transition disabled:opacity-50"
           onClick={onOpenArchitecture}
           disabled={busy}
         >
-          <ExternalLink size={16} />
-          Open Architecture
+          <ExternalLink size={14} />
+          View Architecture Map
         </button>
       </div>
     </div>
@@ -301,24 +389,24 @@ type EditorRedirectPanelProps = {
 
 function EditorRedirectPanel({ path, busy, onOpenEditor }: EditorRedirectPanelProps) {
   return (
-    <div className="mt-4 rounded-md border border-line bg-panel p-3">
+    <div className="mt-4 rounded-xl border border-line/30 bg-brand-sidebar/40 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-sm font-semibold text-ink">Editor handoff ready</p>
-          <p className="mt-1 text-xs leading-5 text-zinc-600">
+          <p className="text-sm font-semibold text-textPrimary">✏️ Open Manual Code Editor</p>
+          <p className="mt-1 text-xs leading-relaxed text-textSecondary">
             {path
-              ? `Open Editor with ${path} selected, load the current file, then preview and approve the diff.`
-              : "Open Editor, choose the file, then preview and approve the diff."}
+              ? `Let's make changes inside the file explorer for "${path}".`
+              : "Open the file editor panel to select, inspect, and safely revise files."}
           </p>
         </div>
         <button
           type="button"
-          className="inline-flex items-center justify-center gap-2 rounded-md bg-ink px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-zinc-800 px-4 py-2.5 text-xs font-semibold text-white shadow hover:bg-zinc-700 hover:text-white transition disabled:opacity-50"
           onClick={onOpenEditor}
           disabled={busy}
         >
-          <ExternalLink size={16} />
-          Open Editor
+          <ExternalLink size={14} />
+          Launch Code Editor
         </button>
       </div>
     </div>
@@ -355,121 +443,127 @@ function AgentActionPanel({
   onOpenPlanner,
 }: AgentActionPanelProps) {
   return (
-    <div className="mt-4 rounded-md border border-accent/30 bg-accent/5 p-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="mt-4 rounded-xl border border-line/30 bg-panel p-4 space-y-4 shadow-xl">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-sm font-semibold text-ink">Agent action ready</p>
-          <p className="mt-1 text-xs leading-5 text-zinc-600">
-            Review this diff here, approve it from chat, or open Planner for the larger workspace.
+          <p className="text-sm font-bold text-accent">🔬 Change Set Draft Prepared</p>
+          <p className="text-xs text-textSecondary">
+            The coding assistant drafted the edits. Preview the git diff and approve below.
           </p>
         </div>
-        <span className="rounded bg-white px-2 py-1 text-xs font-medium uppercase text-zinc-600">
-          {changeSet.status.replace("_", " ")}
+        <span className="rounded-full bg-accent-dim px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent border border-accent/20">
+          Status: {changeSet.status.replace("_", " ")}
         </span>
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         {changeSet.files.map((file) => (
-          <span key={file} className="rounded bg-white px-2 py-1 text-xs text-zinc-700">
-            {file}
+          <span
+            key={file}
+            className="rounded bg-brand-bg border border-line/20 px-2 py-0.5 font-mono text-[10px] text-textSecondary"
+          >
+            📄 {file}
           </span>
         ))}
       </div>
 
-      <details className="mt-3 rounded-md border border-line bg-white">
-        <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-zinc-700">View diff</summary>
-        <pre className="max-h-80 overflow-auto border-t border-line bg-zinc-950 p-3 text-xs leading-5 text-zinc-100">
-          <code>{changeSet.diff || "No diff available."}</code>
+      <details className="rounded-lg border border-line/20 bg-brand-bg overflow-hidden">
+        <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-textSecondary hover:text-accent transition">
+          🔎 Preview Git Diff
+        </summary>
+        <pre className="max-h-80 overflow-auto border-t border-line/10 bg-brand-bg p-3 text-[11px] leading-relaxed text-textPrimary font-mono">
+          <code>{changeSet.diff || "No changes registered in the diff."}</code>
         </pre>
       </details>
 
-      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+      <div className="flex flex-wrap gap-2 pt-1">
         <button
           type="button"
-          className="inline-flex items-center justify-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-panel disabled:opacity-60"
+          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-line/30 bg-panel px-3 py-2 text-xs font-semibold text-zinc-300 hover:bg-zinc-800 hover:text-white transition disabled:opacity-50"
           onClick={onOpenPlanner}
           disabled={busy}
         >
-          <ExternalLink size={16} />
-          Open Planner
+          <ExternalLink size={13} />
+          Explore Details
         </button>
 
-        {changeSet.status === "pending" ? (
+        {changeSet.status === "pending" && (
           <>
             <button
               type="button"
-              className="inline-flex items-center justify-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white shadow hover:bg-accent-light transition disabled:opacity-50"
               onClick={onApproveEdit}
               disabled={busy || !isPlannerChangeSet}
             >
-              <Check size={16} />
-              {pendingAction === "planner-automation" ? "Applying..." : "Approve edit"}
+              <Check size={13} />
+              {pendingAction === "planner-automation" ? "Applying edits..." : "Approve & Apply Edits"}
             </button>
             <button
               type="button"
-              className="inline-flex items-center justify-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-panel disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-red-900/30 bg-red-950/20 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-600 hover:text-white transition disabled:opacity-50"
               onClick={onRejectEdit}
               disabled={busy}
             >
-              <X size={16} />
-              {pendingAction === "edit-reject" ? "Rejecting..." : "Reject"}
+              <X size={13} />
+              {pendingAction === "edit-reject" ? "Rejecting..." : "Discard Diff"}
             </button>
           </>
-        ) : null}
+        )}
 
-        {changeSet.status === "applied" ? (
+        {changeSet.status === "applied" && (
           <>
             <button
               type="button"
-              className="inline-flex items-center justify-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white shadow hover:bg-accent-light transition disabled:opacity-50"
               onClick={onApproveReview}
               disabled={busy || !isPlannerChangeSet}
             >
-              <Check size={16} />
-              {pendingAction === "planner-review" ? "Reviewing..." : "Approve Review Agent"}
+              <Check size={13} />
+              {pendingAction === "planner-review" ? "Running review..." : "Run AI Code Review"}
             </button>
             <button
               type="button"
-              className="rounded-md border border-line bg-white px-3 py-2 text-sm font-medium text-ink hover:bg-panel disabled:opacity-60"
+              className="rounded-lg border border-line/30 bg-panel px-3 py-2 text-xs font-semibold text-zinc-400 hover:bg-zinc-850 hover:text-white transition disabled:opacity-50"
               onClick={onSkipReview}
               disabled={busy}
             >
-              Skip review
+              Skip Code Review
             </button>
           </>
-        ) : null}
+        )}
       </div>
 
-      {changeSet.status === "applied" && commitPreview?.has_changes ? (
-        <div className="mt-3 rounded-md border border-line bg-white p-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+      {changeSet.status === "applied" && commitPreview?.has_changes && (
+        <div className="mt-3 rounded-lg border border-line/20 bg-brand-bg p-3 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line/10 pb-2">
             <div>
-              <p className="text-sm font-semibold text-ink">Commit Assistant draft</p>
-              <p className="mt-1 text-xs leading-5 text-zinc-600">
-                Review or edit the full commit and PR text in Planner. You can approve the commit from here.
+              <p className="text-xs font-bold text-textPrimary">🚀 Commit Assistant Draft</p>
+              <p className="text-[10px] text-textMuted">
+                Pushes changes directly to GitHub remote repository.
               </p>
             </div>
-            {createdCommit ? (
-              <span className="rounded bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
-                pushed {createdCommit.commit_hash.slice(0, 8)}
+            {createdCommit && (
+              <span className="rounded-full bg-emerald-dim text-emerald-500 border border-emerald-500/20 px-2.5 py-0.5 text-[10px] font-bold">
+                ✓ Pushed {createdCommit.commit_hash.slice(0, 7)}
               </span>
-            ) : null}
+            )}
           </div>
-          <div className="mt-3 rounded bg-panel p-2 font-mono text-xs leading-5 text-zinc-700">
+          <div className="rounded bg-panel border border-line/15 p-2 font-mono text-[11px] leading-relaxed text-textPrimary whitespace-pre-wrap">
             {commitPreview.commit_message || "No commit message drafted."}
           </div>
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <div className="flex gap-2">
             <button
               type="button"
-              className="rounded-md bg-ink px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+              className="rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white shadow hover:bg-accent-light transition disabled:opacity-50"
               onClick={onCreateCommit}
               disabled={busy || Boolean(createdCommit) || !commitPreview.commit_message.trim()}
             >
-              {pendingAction === "create-commit" ? "Pushing..." : createdCommit ? "Pushed" : "Approve commit and push"}
+              {pendingAction === "create-commit" ? "Pushed..." : createdCommit ? "Pushed" : "Approve & Push Commit"}
             </button>
           </div>
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
+

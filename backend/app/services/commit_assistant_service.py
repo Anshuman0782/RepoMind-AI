@@ -7,7 +7,7 @@ from git.exc import GitCommandError
 
 from app.services.file_scanner import IGNORED_DIRS, IGNORED_FILES, is_text_file_path
 from app.services.llm_provider import LLMProviderError, generate_answer
-from app.services.repo_service import get_project_path
+from app.services.repo_service import ensure_project_write_access, get_project_path
 
 
 MAX_DIFF_CHARS = 20_000
@@ -47,13 +47,14 @@ async def prepare_commit(project_id: str, context: str | None = None) -> dict:
 
 
 async def create_commit(project_id: str, commit_message: str) -> dict:
+    project = await ensure_project_write_access(project_id)
     root = (await get_project_path(project_id)).resolve()
     repo = _repo(root)
     diff = _full_diff(root, repo)
     changed_files = _changed_files(repo, diff)
     if not diff.strip():
         commit = repo.head.commit
-        push_result = _push_commit(repo)
+        push_result = _push_commit(repo, project)
         return {
             "commit_hash": commit.hexsha,
             "commit_message": commit.message.strip(),
@@ -66,7 +67,7 @@ async def create_commit(project_id: str, commit_message: str) -> dict:
 
     repo.git.add("-A")
     commit = repo.index.commit(commit_message.strip())
-    push_result = _push_commit(repo)
+    push_result = _push_commit(repo, project)
     return {
         "commit_hash": commit.hexsha,
         "commit_message": commit.message.strip(),
@@ -78,7 +79,7 @@ async def create_commit(project_id: str, commit_message: str) -> dict:
     }
 
 
-def _push_commit(repo: Repo) -> dict:
+def _push_commit(repo: Repo, project: dict) -> dict:
     try:
         branch = repo.active_branch.name
     except TypeError as exc:
@@ -88,11 +89,18 @@ def _push_commit(repo: Repo) -> dict:
         raise ValueError("Cannot push commit because this repository has no origin remote.")
 
     remote = repo.remote("origin")
+    original_url = remote.url
+    push_url = _authenticated_remote_url(original_url, project)
     try:
+        if push_url != original_url:
+            remote.set_url(push_url)
         results = remote.push(refspec=f"{branch}:{branch}")
     except GitCommandError as exc:
-        details = (exc.stderr or exc.stdout or str(exc)).strip()
+        details = _sanitize_git_error(exc.stderr or exc.stdout or str(exc), project)
         raise ValueError(f"Commit was created, but GitHub push failed: {details}") from exc
+    finally:
+        if push_url != original_url:
+            remote.set_url(original_url)
 
     summaries = [result.summary.strip() for result in results if result.summary]
     errors = [
@@ -109,6 +117,31 @@ def _push_commit(repo: Repo) -> dict:
         "pushed": True,
         "push_summary": "; ".join(summaries) or f"Pushed to origin/{branch}",
     }
+
+
+def _authenticated_remote_url(remote_url: str, project: dict) -> str:
+    token = project.get("github_access_token")
+    if not token:
+        raise ValueError("GitHub write access is missing. Connect GitHub again before pushing.")
+
+    if remote_url.startswith("https://github.com/"):
+        return remote_url.replace("https://github.com/", f"https://x-access-token:{token}@github.com/", 1)
+
+    owner = project.get("github_owner")
+    repo = project.get("github_repo")
+    if remote_url.startswith("git@github.com:") and owner and repo:
+        return f"https://x-access-token:{token}@github.com/{owner}/{repo}.git"
+
+    return remote_url
+
+
+def _sanitize_git_error(details: str, project: dict) -> str:
+    cleaned = (details or "Unknown git push error").strip()
+    token = project.get("github_access_token")
+    if token:
+        cleaned = cleaned.replace(token, "[redacted]")
+    cleaned = re.sub(r"https://x-access-token:[^@\s]+@", "https://[redacted]@", cleaned)
+    return cleaned
 
 
 def _repo(root: Path) -> Repo:

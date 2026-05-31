@@ -2,6 +2,7 @@ from pathlib import Path
 from uuid import uuid4
 import asyncio
 from datetime import datetime, timezone
+import re
 
 from git import Repo
 
@@ -12,6 +13,8 @@ from app.services.vector_store import delete_collection, upsert_chunks
 
 
 RUNNING_STATUSES = {"importing", "indexing"}
+READ_ONLY_ACCESS = "read_only"
+WRITE_ENABLED_ACCESS = "write_enabled"
 
 
 def utc_now() -> datetime:
@@ -21,6 +24,7 @@ def utc_now() -> datetime:
 async def create_project(name: str, repo_url: str) -> dict:
     project_id = str(uuid4())
     project_dir = settings.repos_dir / project_id
+    github_repo = github_repo_metadata(repo_url)
 
     project = {
         "_id": project_id,
@@ -28,6 +32,11 @@ async def create_project(name: str, repo_url: str) -> dict:
         "repo_url": repo_url,
         "local_path": str(project_dir),
         "status": "importing",
+        "access_mode": READ_ONLY_ACCESS,
+        "auth_provider": None,
+        "github_owner": github_repo["owner"],
+        "github_repo": github_repo["repo"],
+        "github_permissions": {"pull": True, "push": False},
         "file_count": 0,
         "chunk_count": 0,
         "created_at": utc_now(),
@@ -122,6 +131,42 @@ async def get_project_path(project_id: str) -> Path:
     if not project:
         raise ValueError("Project not found")
     return Path(project["local_path"])
+
+
+def github_repo_metadata(repo_url: str) -> dict:
+    match = re.search(r"github\.com[:/]+([^/\s]+)/([^/\s#?]+)", repo_url, flags=re.IGNORECASE)
+    if not match:
+        return {"owner": None, "repo": None}
+    repo = re.sub(r"\.git$", "", match.group(2).strip())
+    return {"owner": match.group(1).strip(), "repo": repo}
+
+
+def project_access_mode(project: dict) -> str:
+    return project.get("access_mode") or READ_ONLY_ACCESS
+
+
+def project_has_write_access(project: dict) -> bool:
+    permissions = project.get("github_permissions") or {}
+    return project_access_mode(project) == WRITE_ENABLED_ACCESS and permissions.get("push") is True
+
+
+def project_write_error(project: dict) -> str | None:
+    if project_has_write_access(project):
+        return None
+    return (
+        "Editing this repository requires GitHub login with write access. "
+        "You can still debug, ask questions, generate docs, and create plans in read-only mode."
+    )
+
+
+async def ensure_project_write_access(project_id: str) -> dict:
+    project = await db.projects.find_one({"_id": project_id})
+    if not project:
+        raise ValueError("Project not found")
+    error = project_write_error(project)
+    if error:
+        raise PermissionError(error)
+    return project
 
 
 async def recover_interrupted_imports() -> None:

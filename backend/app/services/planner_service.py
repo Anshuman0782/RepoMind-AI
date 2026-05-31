@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import re
 
 from app.models.schemas import SourceChunk
@@ -10,6 +11,15 @@ from app.services.vector_store import search_chunks
 MAX_PLAN_CHUNKS = 6
 MAX_KEYWORD_RESULTS = 6
 MAX_TOTAL_EVIDENCE = 20
+
+
+@dataclass
+class FileIntent:
+    action: str | None = None
+    path: str | None = None
+    content: str | None = None
+    change_request: str | None = None
+    missing_fields: tuple[str, ...] = ()
 
 
 def _keywords(message: str) -> list[str]:
@@ -100,7 +110,11 @@ async def collect_planning_evidence(project_id: str, message: str) -> list[dict]
 async def plan_change(project_id: str, message: str) -> tuple[str, list[SourceChunk], list[dict] | None]:
     chunks = await collect_planning_evidence(project_id, message)
     sources = [SourceChunk(**chunk) for chunk in chunks]
-    proposed_operations = await _proposed_operations_from_request(message)
+    file_intent = parse_file_intent(message)
+    if file_intent.action in {"create", "edit", "delete"} and file_intent.missing_fields:
+        return _missing_file_intent_answer(file_intent), sources, None
+
+    proposed_operations = await _proposed_operations_from_intent(project_id, file_intent, message)
     direct_plan = _direct_change_plan(message, chunks)
     if direct_plan:
         return direct_plan, sources, proposed_operations
@@ -119,73 +133,160 @@ async def plan_change(project_id: str, message: str) -> tuple[str, list[SourceCh
     return answer, sources, proposed_operations
 
 
-async def _proposed_operations_from_request(message: str) -> list[dict] | None:
-    action = _requested_file_action(message)
-    if not action:
+async def _proposed_operations_from_intent(
+    project_id: str,
+    intent: FileIntent,
+    message: str,
+) -> list[dict] | None:
+    if not intent.action or not intent.path or intent.missing_fields:
         return None
 
-    path = _requested_file_path(message)
-    if not path:
-        return None
+    if intent.action == "delete":
+        return [{"action": intent.action, "path": intent.path}]
 
-    if action == "delete":
-        return [{"action": action, "path": path}]
+    if intent.action == "create":
+        if intent.content is None:
+            return None
+        return [{"action": intent.action, "path": intent.path, "content": intent.content}]
 
-    content = _requested_file_content(message)
-    if action == "create" and content is None:
-        content = await _generated_create_file_content(message, path)
+    content = intent.content
+    if intent.action == "edit" and content is None:
+        content = await _generated_edit_file_content(project_id, message, intent.path)
     if content is None:
         return None
 
-    return [{"action": action, "path": path, "content": content}]
+    return [{"action": intent.action, "path": intent.path, "content": content}]
+
+
+def parse_file_intent(message: str) -> FileIntent:
+    user_message = _user_request_text(message)
+    action = _requested_file_action(user_message)
+    path = _requested_file_path(user_message)
+    content = _requested_file_content(user_message)
+    if action == "create" and content is None:
+        content = _requested_create_inline_content(user_message)
+    change_request = _requested_change_request(user_message, path, content) if action == "edit" else None
+
+    missing = []
+    if action == "create":
+        if not path:
+            missing.append("file path")
+        if content is None:
+            missing.append("file content")
+    elif action == "edit":
+        if not path:
+            missing.append("file path")
+        if not change_request and content is None:
+            missing.append("change request")
+    elif action == "delete" and not path:
+        missing.append("file path")
+
+    return FileIntent(
+        action=action,
+        path=path,
+        content=content,
+        change_request=change_request,
+        missing_fields=tuple(missing),
+    )
 
 
 def requested_file_intent(message: str) -> dict:
+    intent = parse_file_intent(message)
     return {
-        "action": _requested_file_action(message),
-        "path": _requested_file_path(message),
-        "has_content": _requested_file_content(message) is not None,
+        "action": intent.action,
+        "path": intent.path,
+        "has_content": intent.content is not None,
     }
 
 
 def _requested_file_action(message: str) -> str | None:
+    message = _user_request_text(message)
     lowered = message.lower()
     path = _requested_file_path(message)
     if re.search(r"\b(delete|remove)\b.*\bfile\b|\bfile\b.*\b(delete|remove)\b", lowered):
         return "delete"
-    if re.search(r"\b(create|add|new)\b.*\bfile\b|\bfile\b.*\b(create|add|new)\b", lowered):
-        return "create"
     if re.search(r"\b(edit|update|replace|modify)\b.*\bfile\b|\bfile\b.*\b(edit|update|replace|modify)\b", lowered):
         return "edit"
+    if re.search(r"\b(create|add|new)\b.*\bfile\b|\bfile\b.*\b(create|add|new)\b", lowered):
+        return "create"
     if path and re.search(r"\b(delete|remove)\b", lowered):
         return "delete"
-    if path and re.search(r"\b(create|add|new|make|build)\b", lowered):
-        return "create"
     if path and re.search(r"\b(edit|update|replace|modify|change)\b", lowered):
         return "edit"
+    if path and re.search(r"\b(create|add|new|make|build)\b", lowered):
+        return "create"
     return None
 
 
 def _requested_file_path(message: str) -> str | None:
+    message = _user_request_text(message)
+    explicit_path_patterns = [
+        r"(?:file\s+path|filepath|path)\s*[:=]\s*`?([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)`?",
+        r"[`'\"]([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)[`'\"]",
+    ]
+    for pattern in explicit_path_patterns:
+        match = re.search(pattern, message, flags=re.IGNORECASE)
+        if match and "/" in match.group(1).replace("\\", "/"):
+            return match.group(1).strip().replace("\\", "/")
+
+    file_name = _requested_file_name(message)
+    directory = _requested_directory_path(message)
+    if file_name and directory:
+        return f"{directory.rstrip('/')}/{file_name}".replace("\\", "/")
+
+    fallback_patterns = [
+        r"(?:file\s+path|filepath|path)\s*[:=]\s*`?([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)`?",
+        r"(?:create|add|new|make|build|edit|update|replace|modify|change|delete|remove)\s+(?:a\s+|the\s+)?(?:file\s+)?[`'\"]?([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)[`'\"]?",
+        r"(?:file|called|named|filename|file\s+name)\s*[:=]?\s*[`'\"]?([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)[`'\"]?",
+        r"[`'\"]([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)[`'\"]",
+    ]
+    for pattern in fallback_patterns:
+        match = re.search(pattern, message, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip().replace("\\", "/")
+
+    match = re.search(r"\b([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)\b", message)
+    if match:
+        return match.group(1).strip().replace("\\", "/")
+    return None
+
+
+def _requested_file_name(message: str) -> str | None:
     patterns = [
-        r"(?:path|file path|filepath)\s*[:=]\s*`?([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)`?",
-        r"(?:create|add|new|make|build|edit|update|replace|modify|change|delete|remove)\s+(?:a\s+|the\s+)?(?:file\s+)?`?([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)`?",
-        r"(?:file|called|named)\s+`?([A-Za-z0-9_./\\+-]+\.[A-Za-z0-9+]+)`?",
+        r"(?:filename|file\s+name|called|named|file)\s*[:=]?\s*[`'\"]?([A-Za-z0-9_+-]+\.[A-Za-z0-9+]+)[`'\"]?",
     ]
     for pattern in patterns:
         match = re.search(pattern, message, flags=re.IGNORECASE)
         if match:
-            return match.group(1).strip().replace("\\", "/")
+            return match.group(1).strip()
+    return None
+
+
+def _requested_directory_path(message: str) -> str | None:
+    patterns = [
+        r"\b(?:folder|directory|dir|inside|in|at|path)\b\s*[:=]?\s*[`'\"]?([A-Za-z0-9_./\\+-]+)[`'\"]?",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, message, flags=re.IGNORECASE)
+        if not match:
+            continue
+        value = match.group(1).strip().replace("\\", "/")
+        if "." in value.rsplit("/", 1)[-1]:
+            continue
+        if value.lower() in {"file", "folder", "directory", "path"}:
+            continue
+        return value
     return None
 
 
 def _requested_file_content(message: str) -> str | None:
+    message = _user_request_text(message)
     fenced = re.search(r"```[a-zA-Z0-9_+#.-]*\n?([\s\S]*?)```", message)
     if fenced:
         return fenced.group(1).rstrip("\n")
 
     marker = re.search(
-        r"(?:content|contents|write|with this|put this)\s*[:=]?\s*([\s\S]+)$",
+        r"(?:content|contents|file\s+content|write\s+this|with\s+this|put\s+this)\s*(?:is|as|[:=])?\s*([\s\S]+)$",
         message,
         flags=re.IGNORECASE,
     )
@@ -194,6 +295,118 @@ def _requested_file_content(message: str) -> str | None:
 
     content = marker.group(1).strip()
     return content or None
+
+
+def _requested_create_inline_content(message: str) -> str | None:
+    marker = re.search(r"\bwith\s+([\s\S]+)$", message, flags=re.IGNORECASE)
+    if not marker:
+        return None
+    content = marker.group(1).strip()
+    if not content or re.match(r"^(file|path|name|filename)\b", content, flags=re.IGNORECASE):
+        return None
+    return content
+
+
+def _requested_change_request(message: str, path: str | None, content: str | None) -> str | None:
+    if content is not None:
+        return "replace the full file content"
+    cleaned = _user_request_text(message).strip()
+    if path:
+        cleaned = cleaned.replace(path, " ")
+        cleaned = cleaned.replace(path.replace("/", "\\"), " ")
+    cleaned = re.sub(r"\b(in|at|inside)\s*$", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"^\s*\b(edit|update|modify|change)\b\s+(?:the\s+)?(?:file\s+)?",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"^\s*and\s+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    return cleaned or None
+
+
+def _missing_file_intent_answer(intent: FileIntent) -> str:
+    fields = ", ".join(intent.missing_fields)
+    action = intent.action or "file change"
+    return (
+        "**More Details Needed**\n"
+        f"I can handle this {action} request, but I still need: {fields}.\n\n"
+        "**Please Reply With**\n"
+        "- File path, including the file name, for example `src/example.ts`.\n"
+        "- File content for create requests, or the exact change you want for edit requests."
+    )
+
+
+def _user_request_text(message: str) -> str:
+    return re.split(r"\n\s*Language requirement:", message, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+
+
+async def _generated_edit_file_content(project_id: str, message: str, path: str) -> str | None:
+    try:
+        file_content = await read_file(project_id, path)
+    except (FileNotFoundError, ValueError):
+        return None
+
+    original = file_content["content"]
+    request = _requested_change_request(message, path, None) or _user_request_text(message)
+    fallback = _fallback_edit_file_content(original, request)
+    if fallback is not None:
+        return fallback
+
+    prompt = (
+        "Rewrite the complete file content to satisfy the user's requested edit. "
+        "Return only the full updated file content. Do not include markdown fences, explanations, or diffs. "
+        "Preserve unrelated code and formatting as much as possible. If the request is ambiguous or cannot be "
+        "applied safely, return the exact text CANNOT_APPLY_EDIT.\n\n"
+        f"File path: {path}\n"
+        f"User edit request: {request}\n\n"
+        f"Current file content:\n{original}"
+    )
+    try:
+        updated = await generate_answer(prompt, [{"file_path": path, "start_line": 1, "end_line": file_content["line_count"], "content": original}])
+    except LLMProviderError:
+        return None
+
+    cleaned = _strip_code_fence(updated)
+    if cleaned.strip() == "CANNOT_APPLY_EDIT" or cleaned == original:
+        return None
+    return cleaned
+
+
+def _fallback_edit_file_content(original: str, request: str) -> str | None:
+    match = re.search(
+        r"\breplace\s+[`'\"]?(.+?)[`'\"]?\s+with\s+[`'\"]?(.+?)[`'\"]?$",
+        request,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if match:
+        old = match.group(1).strip()
+        new = match.group(2).strip()
+        return original.replace(old, new, 1) if old in original else None
+
+    match = re.search(
+        r"\b(?:change|update)\s+(.+?)\s+(?:from\s+[`'\"]?(.+?)[`'\"]?\s+)?to\s+[`'\"]?(.+?)[`'\"]?$",
+        request,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if match:
+        subject = match.group(1).strip().lower()
+        old = (match.group(2) or "").strip()
+        new = match.group(3).strip()
+        if old and old in original:
+            return original.replace(old, new, 1)
+        if subject in {"title", "html title", "page title"}:
+            updated, count = re.subn(
+                r"(<title>)(.*?)(</title>)",
+                lambda match: f"{match.group(1)}{new}{match.group(3)}",
+                original,
+                count=1,
+                flags=re.IGNORECASE | re.DOTALL,
+            )
+            return updated if count else None
+
+    return None
 
 
 async def _generated_create_file_content(message: str, path: str) -> str:

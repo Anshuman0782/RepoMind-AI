@@ -208,14 +208,16 @@ def normalize_response_language(value: str | None) -> str:
 
 
 def language_instruction(message: str, response_language: str | None = None) -> str:
-    normalized = normalize_response_language(response_language)
-    if normalized == "auto":
-        normalized = detect_message_language(message)
+    normalized = response_language_for_message(message, response_language)
     language = SUPPORTED_RESPONSE_LANGUAGES[normalized]
     return (
         "Language requirement: answer in "
         f"{language}. Preserve code, file paths, commands, identifiers, and quoted errors exactly. "
-        "Keep markdown headings and bullets readable in that language."
+        "Do not translate or rewrite code symbols. Preserve the meaning of the repository evidence instead of "
+        "doing a word-for-word translation. Use natural, fluent wording for the selected language. "
+        "Keep markdown headings and bullets readable in that language. Organize the answer with short sections, "
+        "specific bullets, and clear next steps when useful. If a technical term is clearer in English, keep the "
+        "English term and explain it briefly in the selected language."
     )
 
 

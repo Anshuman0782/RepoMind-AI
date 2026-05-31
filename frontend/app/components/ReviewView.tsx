@@ -3,6 +3,7 @@
 import { FormEvent } from "react";
 import { ChatMessage } from "../types";
 import { LatestSavedResult } from "./LatestSavedResult";
+import { ShieldAlert, BookOpen } from "lucide-react";
 
 type ReviewViewProps = {
   selectedProjectId: string;
@@ -25,30 +26,37 @@ export function ReviewView({
 }: ReviewViewProps) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto py-4">
-      <div className="mx-auto max-w-3xl rounded-md border border-line bg-white p-4 sm:p-5">
-        <form className="space-y-3" onSubmit={onCodeReview}>
+      <div className="mx-auto max-w-3xl rounded-xl border border-line/20 bg-panel/30 p-5 shadow-xl backdrop-blur-md space-y-4">
+        {/* Title Indicator */}
+        <div className="flex items-center gap-2 px-1 text-textPrimary font-bold text-sm">
+          <ShieldAlert size={16} className="text-accent" />
+          <span>Launch AI Code Review</span>
+        </div>
+
+        {/* Input Form */}
+        <form className="space-y-4" onSubmit={onCodeReview}>
           <textarea
-            className="min-h-36 w-full resize-none rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent"
-            placeholder="Optional: describe the changed feature, risk area, or test focus..."
+            className="min-h-36 w-full resize-none rounded-xl border border-line/30 bg-brand-bg px-4 py-3 text-xs sm:text-sm text-ink placeholder-textMuted outline-none focus:border-accent transition"
+            placeholder="Optional context: focus area, regression concerns, or specific files..."
             value={reviewPrompt}
             onChange={(event) => setReviewPrompt(event.target.value)}
             disabled={!selectedProjectId || busy}
           />
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-xs leading-5 text-zinc-500">
-              Reviews inspect the current git diff and save findings into chat.
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-textSecondary font-medium">
+              💡 Code reviews scan uncommitted git diffs and persist warnings in chat.
             </p>
             <button
-              className="rounded-md bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+              className="rounded-lg bg-accent px-4 py-2.5 text-xs font-semibold text-white shadow hover:bg-accent-light transition disabled:opacity-50"
               disabled={busy || !selectedProjectId}
             >
-              {pendingAction === "code-review" ? "Reviewing..." : "Review changes"}
+              {pendingAction === "code-review" ? "Analyzing diff..." : "Trigger Code Review"}
             </button>
           </div>
         </form>
 
-        <div className="mt-5 rounded-md border border-line bg-panel p-3 text-sm text-zinc-600">
-          Test commands are suggested only; run them after you approve the check.
+        <div className="rounded-xl border border-line/10 bg-brand-bg px-4 py-3 text-xs text-textSecondary leading-relaxed">
+          ⚠️ **Safety Guidelines**: AI recommendations and test suites are suggested for local execution. Nothing will run automatically on the host machine.
         </div>
 
         <LatestSavedResult messages={currentMessages} />
@@ -56,3 +64,4 @@ export function ReviewView({
     </div>
   );
 }
+
