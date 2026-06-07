@@ -1,0 +1,11 @@
+[2026-05-31T12:16:39.389538+00:00] OTP: 818203 for emni46702@gmail.com - Reset Link: http://localhost:3000/reset-password?email=emni46702@gmail.com&otp=818203
+[2026-05-31T12:17:32.223868+00:00] OTP: 271806 for anshumansarkar600@gmail.com - Reset Link: http://localhost:3000/reset-password?email=anshumansarkar600@gmail.com&otp=271806
+[2026-05-31T12:28:41.832873+00:00] OTP: 796039 for emni46702@gmail.com - Reset Link: http://localhost:3000/reset-password?email=emni46702@gmail.com&otp=796039
+[2026-05-31T12:30:29.093589+00:00] OTP: 719109 for emni46702@gmail.com - Reset Link: http://localhost:3000/reset-password?email=emni46702@gmail.com&otp=719109
+[2026-05-31T12:31:51.472721+00:00] OTP: 265909 for anshumansarkar600@gmail.com - Reset Link: http://localhost:3000/reset-password?email=anshumansarkar600@gmail.com&otp=265909
+[2026-05-31T13:09:26.803862+00:00] OTP: 160872 for emni46702@gmail.com - Reset Link: http://localhost:3000/reset-password?email=emni46702@gmail.com&otp=160872 - SMTP Sent: False
+[2026-05-31T13:12:59.905558+00:00] OTP: 759705 for emni46702@gmail.com - Reset Link: http://localhost:3000/reset-password?email=emni46702@gmail.com&otp=759705 - SMTP Sent: False
+[2026-05-31T13:13:46.387415+00:00] OTP: 832737 for emni46702@gmail.com - Reset Link: http://localhost:3000/reset-password?email=emni46702@gmail.com&otp=832737 - SMTP Sent: False
+[2026-05-31T13:19:12.860484+00:00] OTP: 187403 for emni46702@gmail.com - Reset Link: http://localhost:3000/reset-password?email=emni46702@gmail.com&otp=187403 - SMTP Sent: False
+[2026-05-31T13:25:48.222030+00:00] OTP: 037939 for emni46702@gmail.com - Reset Link: http://localhost:3000/reset-password?email=emni46702@gmail.com&otp=037939 - SMTP Sent: True
+[2026-06-05T07:10:42.970783+00:00] OTP: 648068 for emni46702@gmail.com - Reset Link: http://localhost:3000/reset-password?email=emni46702@gmail.com&otp=648068 - SMTP Sent: True

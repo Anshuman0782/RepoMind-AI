@@ -46,8 +46,8 @@ async def prepare_commit(project_id: str, context: str | None = None) -> dict:
     }
 
 
-async def create_commit(project_id: str, commit_message: str) -> dict:
-    project = await ensure_project_write_access(project_id)
+async def create_commit(project_id: str, commit_message: str, user: dict | None = None) -> dict:
+    project = await ensure_project_write_access(project_id, user)
     root = (await get_project_path(project_id)).resolve()
     repo = _repo(root)
     diff = _full_diff(root, repo)

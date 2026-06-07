@@ -165,3 +165,53 @@ class ChatMessageResponse(BaseModel):
     answer: str
     sources: list[SourceChunk]
     created_at: str
+
+
+class UserRegisterRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=50)
+    email: str = Field(min_length=5, max_length=100)
+    password: str = Field(min_length=6, max_length=100)
+
+
+class UserLoginRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=100)
+    password: str = Field(min_length=6, max_length=100)
+
+
+class UserAuthResponse(BaseModel):
+    id: str
+    username: str
+    email: str
+    has_github: bool = False
+    github_user_login: str | None = None
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "Bearer"
+    user: UserAuthResponse
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(min_length=5, max_length=100)
+
+
+class ResetPasswordRequest(BaseModel):
+    email: str = Field(min_length=5, max_length=100)
+    otp: str = Field(min_length=4, max_length=10)
+    new_password: str = Field(min_length=6, max_length=100)
+
+
+class GitHubLoginRequest(BaseModel):
+    code: str
+    state: str | None = None
+
+
+class UserProfileUpdateRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=50)
+
+
+class UserPasswordUpdateRequest(BaseModel):
+    current_password: str = Field(min_length=6, max_length=100)
+    new_password: str = Field(min_length=6, max_length=100)
+

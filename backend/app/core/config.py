@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     github_client_secret: str = ""
     public_backend_url: str = "http://localhost:8001"
     frontend_url: str = "http://localhost:3000"
+    jwt_secret_key: str = "repomind_secure_jwt_secret_key_2026_pilot"
+    jwt_algorithm: str = "HS256"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

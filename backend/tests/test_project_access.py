@@ -35,6 +35,16 @@ class ProjectAccessTests(unittest.TestCase):
         self.assertTrue(project_has_write_access(project))
         self.assertIsNone(project_write_error(project))
 
+    def test_write_access_with_github_user(self):
+        # Even if the project is marked read_only, a user with a github_access_token should have write access.
+        project = {
+            "access_mode": READ_ONLY_ACCESS,
+            "github_permissions": {"pull": True, "push": False},
+        }
+        user = {"github_access_token": "mock-token-xyz"}
+        self.assertTrue(project_has_write_access(project, user=user))
+        self.assertIsNone(project_write_error(project, user=user))
+
     def test_github_metadata_extracts_owner_and_repo(self):
         metadata = github_repo_metadata("https://github.com/openai/example-repo.git")
 

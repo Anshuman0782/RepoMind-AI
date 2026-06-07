@@ -1,5 +1,126 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8001";
 
+export type User = {
+  id: string;
+  username: string;
+  email: string;
+  has_github: boolean;
+  github_user_login?: string | null;
+};
+
+export type AuthResponse = {
+  access_token: string;
+  token_type: string;
+  user: User;
+};
+
+export function getAuthToken(): string | null {
+  if (typeof window !== "undefined") {
+    return localStorage.getItem("repomind_token");
+  }
+  return null;
+}
+
+export async function authFetch(url: string, init?: RequestInit): Promise<Response> {
+  const token = getAuthToken();
+  const headers = new Headers(init?.headers);
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  return fetch(url, {
+    ...init,
+    headers,
+  });
+}
+
+export async function signupUser(username: string, email: string, password: string): Promise<User> {
+  const response = await fetch(`${API_BASE_URL}/api/auth/signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, email, password }),
+  });
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return response.json();
+}
+
+export async function loginUser(emailOrUsername: string, password: string): Promise<AuthResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: emailOrUsername, password }),
+  });
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  const data = await response.json();
+  if (data.access_token) {
+    localStorage.setItem("repomind_token", data.access_token);
+  }
+  return data;
+}
+
+export async function githubLoginUser(code: string): Promise<AuthResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/auth/github/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  const data = await response.json();
+  if (data.access_token) {
+    localStorage.setItem("repomind_token", data.access_token);
+  }
+  return data;
+}
+
+export async function linkGitHubUser(code: string): Promise<User> {
+  const response = await authFetch(`${API_BASE_URL}/api/auth/link-github`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return response.json();
+}
+
+export async function forgotPassword(email: string): Promise<{ message: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/auth/forgot-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return response.json();
+}
+
+export async function resetPassword(payload: { email: string; otp: string; new_password: string }): Promise<{ message: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/auth/reset-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: payload.email, otp: payload.otp, new_password: payload.new_password }),
+  });
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return response.json();
+}
+
+export async function getProfile(): Promise<User> {
+  const response = await authFetch(`${API_BASE_URL}/api/auth/me`);
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return response.json();
+}
+
 export type Project = {
   id: string;
   name: string;
@@ -107,7 +228,7 @@ export type GitHubAuthStart = {
 };
 
 export async function createProject(name: string, repoUrl: string): Promise<Project> {
-  const response = await fetch(`${API_BASE_URL}/api/projects`, {
+  const response = await authFetch(`${API_BASE_URL}/api/projects`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, repo_url: repoUrl }),
@@ -121,7 +242,7 @@ export async function createProject(name: string, repoUrl: string): Promise<Proj
 }
 
 export async function listProjects(): Promise<Project[]> {
-  const response = await fetch(`${API_BASE_URL}/api/projects`);
+  const response = await authFetch(`${API_BASE_URL}/api/projects`);
   if (!response.ok) {
     throw new Error(await readApiError(response));
   }
@@ -129,7 +250,7 @@ export async function listProjects(): Promise<Project[]> {
 }
 
 export async function deleteProject(projectId: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}`, {
+  const response = await authFetch(`${API_BASE_URL}/api/projects/${projectId}`, {
     method: "DELETE",
   });
 
@@ -139,7 +260,7 @@ export async function deleteProject(projectId: string): Promise<void> {
 }
 
 export async function reindexProject(projectId: string): Promise<Project> {
-  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/reindex`, {
+  const response = await authFetch(`${API_BASE_URL}/api/projects/${projectId}/reindex`, {
     method: "POST",
   });
 
@@ -151,7 +272,7 @@ export async function reindexProject(projectId: string): Promise<Project> {
 }
 
 export async function startGitHubProjectAuth(projectId: string): Promise<GitHubAuthStart> {
-  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/github-auth/start`, {
+  const response = await authFetch(`${API_BASE_URL}/api/projects/${projectId}/github-auth/start`, {
     method: "POST",
   });
 
@@ -163,7 +284,7 @@ export async function startGitHubProjectAuth(projectId: string): Promise<GitHubA
 }
 
 export async function listProjectFiles(projectId: string): Promise<FileEntry[]> {
-  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/files`);
+  const response = await authFetch(`${API_BASE_URL}/api/projects/${projectId}/files`);
   if (!response.ok) {
     throw new Error(await readApiError(response));
   }
@@ -172,7 +293,7 @@ export async function listProjectFiles(projectId: string): Promise<FileEntry[]> 
 
 export async function readProjectFile(projectId: string, path: string): Promise<FileContent> {
   const params = new URLSearchParams({ path });
-  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/files/content?${params}`);
+  const response = await authFetch(`${API_BASE_URL}/api/projects/${projectId}/files/content?${params}`);
   if (!response.ok) {
     throw new Error(await readApiError(response));
   }
@@ -184,7 +305,7 @@ export async function searchProjectCode(
   query: string,
 ): Promise<CodeSearchResult[]> {
   const params = new URLSearchParams({ query, limit: "100" });
-  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/search?${params}`);
+  const response = await authFetch(`${API_BASE_URL}/api/projects/${projectId}/search?${params}`);
   if (!response.ok) {
     throw new Error(await readApiError(response));
   }
@@ -192,7 +313,7 @@ export async function searchProjectCode(
 }
 
 export async function getProjectGitDiff(projectId: string): Promise<string> {
-  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/git-diff`);
+  const response = await authFetch(`${API_BASE_URL}/api/projects/${projectId}/git-diff`);
   if (!response.ok) {
     throw new Error(await readApiError(response));
   }
@@ -205,7 +326,7 @@ export async function previewCommitAssistant(
   context: string,
 ): Promise<CommitAssistantPreview> {
   const safeContext = context.trim().slice(0, 2000);
-  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/commit-assistant/preview`, {
+  const response = await authFetch(`${API_BASE_URL}/api/projects/${projectId}/commit-assistant/preview`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ context: safeContext }),
@@ -222,7 +343,7 @@ export async function createCommit(
   projectId: string,
   commitMessage: string,
 ): Promise<CreatedCommit> {
-  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/commit-assistant/commit`, {
+  const response = await authFetch(`${API_BASE_URL}/api/projects/${projectId}/commit-assistant/commit`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ commit_message: commitMessage }),
@@ -239,7 +360,7 @@ export async function createEditChangeSet(
   projectId: string,
   operations: FileEditOperation[],
 ): Promise<EditChangeSet> {
-  const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/edit-change-sets`, {
+  const response = await authFetch(`${API_BASE_URL}/api/projects/${projectId}/edit-change-sets`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ operations }),
@@ -278,7 +399,7 @@ async function updateEditChangeSet(
   changeSetId: string,
   action: "apply" | "reject" | "rollback",
 ): Promise<EditChangeSet> {
-  const response = await fetch(
+  const response = await authFetch(
     `${API_BASE_URL}/api/projects/${projectId}/edit-change-sets/${changeSetId}/${action}`,
     { method: "POST" },
   );
@@ -291,7 +412,7 @@ async function updateEditChangeSet(
 }
 
 export async function createChatSession(projectId: string, title?: string): Promise<ChatSession> {
-  const response = await fetch(`${API_BASE_URL}/api/chat/projects/${projectId}/chats`, {
+  const response = await authFetch(`${API_BASE_URL}/api/chat/projects/${projectId}/chats`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title }),
@@ -305,7 +426,7 @@ export async function createChatSession(projectId: string, title?: string): Prom
 }
 
 export async function listChatSessions(projectId: string): Promise<ChatSession[]> {
-  const response = await fetch(`${API_BASE_URL}/api/chat/projects/${projectId}/chats`);
+  const response = await authFetch(`${API_BASE_URL}/api/chat/projects/${projectId}/chats`);
   if (!response.ok) {
     throw new Error(await readApiError(response));
   }
@@ -317,7 +438,7 @@ export async function renameChatSession(
   chatId: string,
   title: string,
 ): Promise<ChatSession> {
-  const response = await fetch(`${API_BASE_URL}/api/chat/projects/${projectId}/chats/${chatId}`, {
+  const response = await authFetch(`${API_BASE_URL}/api/chat/projects/${projectId}/chats/${chatId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title }),
@@ -331,7 +452,7 @@ export async function renameChatSession(
 }
 
 export async function deleteChatSession(projectId: string, chatId: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/chat/projects/${projectId}/chats/${chatId}`, {
+  const response = await authFetch(`${API_BASE_URL}/api/chat/projects/${projectId}/chats/${chatId}`, {
     method: "DELETE",
   });
 
@@ -346,7 +467,7 @@ export async function sendMessage(
   message: string,
   responseLanguage = "auto",
 ): Promise<ChatResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/chat`, {
+  const response = await authFetch(`${API_BASE_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -371,7 +492,7 @@ export async function investigateCodebase(
   mode: "navigator" | "bug",
   responseLanguage = "auto",
 ): Promise<ChatResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/chat/investigate`, {
+  const response = await authFetch(`${API_BASE_URL}/api/chat/investigate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -396,7 +517,7 @@ export async function createChangePlan(
   message: string,
   responseLanguage = "auto",
 ): Promise<ChatResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/chat/plan`, {
+  const response = await authFetch(`${API_BASE_URL}/api/chat/plan`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -421,7 +542,7 @@ export async function reviewCodeChanges(
   changeSetId?: string,
   responseLanguage = "auto",
 ): Promise<ChatResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/chat/review`, {
+  const response = await authFetch(`${API_BASE_URL}/api/chat/review`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -444,7 +565,61 @@ export async function listChatMessages(
   projectId: string,
   chatId: string,
 ): Promise<ChatMessageResponse[]> {
-  const response = await fetch(`${API_BASE_URL}/api/chat/projects/${projectId}/chats/${chatId}/messages`);
+  const response = await authFetch(`${API_BASE_URL}/api/chat/projects/${projectId}/chats/${chatId}/messages`);
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return response.json();
+}
+
+export async function updateProfile(username: string): Promise<User> {
+  const response = await authFetch(`${API_BASE_URL}/api/auth/profile/update`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username }),
+  });
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return response.json();
+}
+
+export async function updatePassword(currentPassword: string, newPassword: string): Promise<{ message: string }> {
+  const response = await authFetch(`${API_BASE_URL}/api/auth/profile/password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return response.json();
+}
+
+export async function unlinkGitHub(): Promise<User> {
+  const response = await authFetch(`${API_BASE_URL}/api/auth/profile/unlink-github`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(await readApiError(response));
+  }
+  return response.json();
+}
+
+export type GitHubRepo = {
+  name: string;
+  full_name: string;
+  html_url: string;
+  clone_url: string;
+  private: boolean;
+  permissions: {
+    pull: boolean;
+    push: boolean;
+  };
+};
+
+export async function listGitHubRepos(): Promise<GitHubRepo[]> {
+  const response = await authFetch(`${API_BASE_URL}/api/projects/github/repos`);
   if (!response.ok) {
     throw new Error(await readApiError(response));
   }

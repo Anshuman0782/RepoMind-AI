@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from app.core.database import db
+from app.core.security import get_current_user
 from app.models.schemas import (
     ChangePlanRequest,
     ChatMessageResponse,
@@ -204,8 +205,11 @@ def suppress_read_only_edit_preview(
     return f"{answer}\n\n{read_only_edit_notice()}", None, True
 
 
-async def create_chat_session(project_id: str, title: str | None = None) -> dict:
-    project = await db.projects.find_one({"_id": project_id})
+async def create_chat_session(project_id: str, title: str | None = None, user_id: str | None = None) -> dict:
+    query = {"_id": project_id}
+    if user_id:
+        query["user_id"] = user_id
+    project = await db.projects.find_one(query)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -221,8 +225,11 @@ async def create_chat_session(project_id: str, title: str | None = None) -> dict
     return chat
 
 
-async def ensure_project_ready_for_chat(project_id: str) -> None:
-    project = await db.projects.find_one({"_id": project_id})
+async def ensure_project_ready_for_chat(project_id: str, user_id: str | None = None) -> None:
+    query = {"_id": project_id}
+    if user_id:
+        query["user_id"] = user_id
+    project = await db.projects.find_one(query)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     error = project_status_error(project)
@@ -232,15 +239,20 @@ async def ensure_project_ready_for_chat(project_id: str) -> None:
 
 @router.post("/projects/{project_id}/chats", response_model=ChatSessionResponse)
 async def create_chat_session_endpoint(
-    project_id: str, payload: CreateChatSessionRequest
+    project_id: str,
+    payload: CreateChatSessionRequest,
+    current_user: dict = Depends(get_current_user),
 ) -> ChatSessionResponse:
-    chat = await create_chat_session(project_id, payload.title)
+    chat = await create_chat_session(project_id, payload.title, user_id=current_user["_id"])
     return to_chat_session_response(chat)
 
 
 @router.get("/projects/{project_id}/chats", response_model=list[ChatSessionResponse])
-async def list_chat_sessions(project_id: str) -> list[ChatSessionResponse]:
-    project = await db.projects.find_one({"_id": project_id})
+async def list_chat_sessions(
+    project_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> list[ChatSessionResponse]:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -249,7 +261,7 @@ async def list_chat_sessions(project_id: str) -> list[ChatSessionResponse]:
         {"project_id": project_id, "chat_id": {"$exists": False}}
     )
     if chat_count == 0 and legacy_message_count > 0:
-        chat = await create_chat_session(project_id, "Imported history")
+        chat = await create_chat_session(project_id, "Imported history", user_id=current_user["_id"])
         await db.chat_messages.update_many(
             {"project_id": project_id, "chat_id": {"$exists": False}},
             {"$set": {"chat_id": chat["_id"]}},
@@ -267,8 +279,15 @@ async def list_chat_sessions(project_id: str) -> list[ChatSessionResponse]:
     response_model=ChatSessionResponse,
 )
 async def update_chat_session(
-    project_id: str, chat_id: str, payload: UpdateChatSessionRequest
+    project_id: str,
+    chat_id: str,
+    payload: UpdateChatSessionRequest,
+    current_user: dict = Depends(get_current_user),
 ) -> ChatSessionResponse:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
     now = utc_now()
     result = await db.chats.update_one(
         {"_id": chat_id, "project_id": project_id},
@@ -287,7 +306,15 @@ async def update_chat_session(
 
 
 @router.delete("/projects/{project_id}/chats/{chat_id}", status_code=204)
-async def delete_chat_session(project_id: str, chat_id: str) -> None:
+async def delete_chat_session(
+    project_id: str,
+    chat_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> None:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
     chat_session = await db.chats.find_one({"_id": chat_id, "project_id": project_id})
     if not chat_session:
         raise HTTPException(status_code=404, detail="Chat not found")
@@ -297,16 +324,19 @@ async def delete_chat_session(project_id: str, chat_id: str) -> None:
 
 
 @router.post("", response_model=ChatResponse)
-async def chat(payload: ChatRequest) -> ChatResponse:
+async def chat(
+    payload: ChatRequest,
+    current_user: dict = Depends(get_current_user),
+) -> ChatResponse:
     chat_session = await db.chats.find_one(
         {"_id": payload.chat_id, "project_id": payload.project_id}
     )
     if not chat_session:
         raise HTTPException(status_code=404, detail="Chat not found")
-    project = await db.projects.find_one({"_id": payload.project_id})
+    project = await db.projects.find_one({"_id": payload.project_id, "user_id": current_user["_id"]})
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    await ensure_project_ready_for_chat(payload.project_id)
+    await ensure_project_ready_for_chat(payload.project_id, user_id=current_user["_id"])
 
     routed_agent = route_chat_agent(payload.message)
     proposed_operations = None
@@ -436,13 +466,19 @@ async def _augment_chat_context(project_id: str, message: str, chunks: list[dict
 
 
 @router.post("/investigate", response_model=ChatResponse)
-async def investigate(payload: InvestigationRequest) -> ChatResponse:
+async def investigate(
+    payload: InvestigationRequest,
+    current_user: dict = Depends(get_current_user),
+) -> ChatResponse:
     chat_session = await db.chats.find_one(
         {"_id": payload.chat_id, "project_id": payload.project_id}
     )
     if not chat_session:
         raise HTTPException(status_code=404, detail="Chat not found")
-    await ensure_project_ready_for_chat(payload.project_id)
+    project = await db.projects.find_one({"_id": payload.project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    await ensure_project_ready_for_chat(payload.project_id, user_id=current_user["_id"])
 
     answer, sources = await investigate_codebase(
         payload.project_id,
@@ -476,13 +512,19 @@ async def investigate(payload: InvestigationRequest) -> ChatResponse:
 
 
 @router.post("/plan", response_model=ChatResponse)
-async def create_change_plan(payload: ChangePlanRequest) -> ChatResponse:
+async def create_change_plan(
+    payload: ChangePlanRequest,
+    current_user: dict = Depends(get_current_user),
+) -> ChatResponse:
     chat_session = await db.chats.find_one(
         {"_id": payload.chat_id, "project_id": payload.project_id}
     )
     if not chat_session:
         raise HTTPException(status_code=404, detail="Chat not found")
-    await ensure_project_ready_for_chat(payload.project_id)
+    project = await db.projects.find_one({"_id": payload.project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    await ensure_project_ready_for_chat(payload.project_id, user_id=current_user["_id"])
 
     if is_documentation_request(payload.message):
         project = await db.projects.find_one({"_id": payload.project_id})
@@ -543,13 +585,19 @@ async def create_change_plan(payload: ChangePlanRequest) -> ChatResponse:
 
 
 @router.post("/review", response_model=ChatResponse)
-async def create_code_review(payload: CodeReviewRequest) -> ChatResponse:
+async def create_code_review(
+    payload: CodeReviewRequest,
+    current_user: dict = Depends(get_current_user),
+) -> ChatResponse:
     chat_session = await db.chats.find_one(
         {"_id": payload.chat_id, "project_id": payload.project_id}
     )
     if not chat_session:
         raise HTTPException(status_code=404, detail="Chat not found")
-    await ensure_project_ready_for_chat(payload.project_id)
+    project = await db.projects.find_one({"_id": payload.project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    await ensure_project_ready_for_chat(payload.project_id, user_id=current_user["_id"])
 
     try:
         answer, sources = await review_changes(
@@ -590,8 +638,13 @@ async def create_code_review(payload: CodeReviewRequest) -> ChatResponse:
     response_model=list[ChatMessageResponse],
 )
 async def list_chat_session_messages(
-    project_id: str, chat_id: str
+    project_id: str,
+    chat_id: str,
+    current_user: dict = Depends(get_current_user),
 ) -> list[ChatMessageResponse]:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     chat_session = await db.chats.find_one({"_id": chat_id, "project_id": project_id})
     if not chat_session:
         raise HTTPException(status_code=404, detail="Chat not found")
@@ -616,7 +669,13 @@ async def list_chat_session_messages(
 
 
 @router.get("/{project_id}", response_model=list[ChatMessageResponse])
-async def list_chat_messages(project_id: str) -> list[ChatMessageResponse]:
+async def list_chat_messages(
+    project_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> list[ChatMessageResponse]:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     messages = []
     cursor = db.chat_messages.find({"project_id": project_id}).sort("created_at", 1)
     async for message in cursor:

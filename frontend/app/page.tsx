@@ -35,8 +35,14 @@ import {
   sendMessage,
   reviewCodeChanges,
   startGitHubProjectAuth,
+  User,
+  getProfile,
+  githubLoginUser,
+  linkGitHubUser,
+  GitHubRepo,
+  listGitHubRepos,
 } from "@/lib/api";
-import { Sun, Moon, ChevronUp, ChevronDown, PanelLeftClose, PanelLeft } from "lucide-react";
+import { Sun, Moon, ChevronUp, ChevronDown, PanelLeftClose, PanelLeft, Loader2, Settings } from "lucide-react";
 
 import { ChatView } from "./components/ChatView";
 import { ArchitectureView } from "./components/ArchitectureView";
@@ -48,8 +54,26 @@ import { PlannerView } from "./components/PlannerView";
 import { ProjectSidebar } from "./components/ProjectSidebar";
 import { ReviewView } from "./components/ReviewView";
 import { WorkspaceTabs } from "./components/WorkspaceTabs";
+import AuthView from "./components/AuthView";
+import SettingsModal from "./components/SettingsModal";
 import { ChatMessage, WorkspaceMode } from "./types";
 import { isDocumentationRequest, titleFromQuestion, toChatMessage } from "./utils";
+
+const GithubIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg
+    viewBox="0 0 24 24"
+    width="14"
+    height="14"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    fill="none"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
+  </svg>
+);
 
 export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -102,12 +126,17 @@ export default function Home() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [githubRepos, setGithubRepos] = useState<GitHubRepo[]>([]);
+  const [loadingGithubRepos, setLoadingGithubRepos] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId);
-  const selectedProjectCanWrite = true; // Bypassed restrictive lock to keep auto-approve fully functional in UI
-  const isActualWriteEnabled = selectedProject?.access_mode === "write_enabled";
+  const isActualWriteEnabled = selectedProject?.access_mode === "write_enabled" || !!currentUser?.has_github;
+  const selectedProjectCanWrite = isActualWriteEnabled;
   const projectChats = selectedProjectId ? chatsByProject[selectedProjectId] ?? [] : [];
   const selectedChat = projectChats.find((chat) => chat.id === selectedChatId);
   const currentMessages = selectedChatId ? messagesByChat[selectedChatId] ?? [] : [];
@@ -132,7 +161,7 @@ export default function Home() {
     return !term || file.path.toLowerCase().includes(term);
   });
 
-  useEffect(() => {
+  const loadProjectsList = () => {
     setLoadingProjects(true);
     listProjects()
       .then((items) => {
@@ -147,7 +176,98 @@ export default function Home() {
       .finally(() => {
         setLoadingProjects(false);
       });
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    const token = localStorage.getItem("repomind_token");
+
+    if (code) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      
+      if (token) {
+        setPendingAction("link-github");
+        linkGitHubUser(code)
+          .then((updatedUser) => {
+            setCurrentUser(updatedUser);
+            loadProjectsList();
+          })
+          .catch((err) => {
+            setError(err instanceof Error ? err.message : "GitHub link failed");
+          })
+          .finally(() => {
+            setPendingAction("");
+          });
+      } else {
+        setCheckingAuth(true);
+        githubLoginUser(code)
+          .then((res) => {
+            setCurrentUser(res.user);
+          })
+          .catch((err) => {
+            setError(err instanceof Error ? err.message : "GitHub login failed");
+          })
+          .finally(() => {
+            setCheckingAuth(false);
+          });
+      }
+    } else if (token) {
+      setCheckingAuth(true);
+      getProfile()
+        .then((user) => {
+          setCurrentUser(user);
+        })
+        .catch((err) => {
+          console.error("Token verification failed", err);
+          localStorage.removeItem("repomind_token");
+        })
+        .finally(() => {
+          setCheckingAuth(false);
+        });
+    } else {
+      setCheckingAuth(false);
+    }
   }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    loadProjectsList();
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (currentUser?.has_github) {
+      setLoadingGithubRepos(true);
+      listGitHubRepos()
+        .then((repos) => {
+          setGithubRepos(repos);
+        })
+        .catch((err) => {
+          console.error("Failed to load GitHub repos", err);
+        })
+        .finally(() => {
+          setLoadingGithubRepos(false);
+        });
+    } else {
+      setGithubRepos([]);
+    }
+  }, [currentUser]);
+
+  function handleLogout() {
+    localStorage.removeItem("repomind_token");
+    setCurrentUser(null);
+    setProjects([]);
+    setSelectedProjectId("");
+    setSelectedChatId("");
+    setChatsByProject({});
+    setMessagesByChat({});
+  }
+
+  function handleLinkGitHub() {
+    const clientId = process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID || 'Ov23liakfpajpVfVMrhG';
+    window.location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&scope=repo,user:email`;
+  }
 
   useEffect(() => {
     if (!selectedProjectId || chatsByProject[selectedProjectId]) {
@@ -1203,6 +1323,26 @@ export default function Home() {
     }
   }
 
+  if (checkingAuth) {
+    return (
+      <div className={`min-h-screen bg-brand-bg text-ink flex flex-col items-center justify-center ${theme === "light" ? "light-theme" : ""}`} style={{ background: 'var(--color-brand-bg)' }}>
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-purple-600 rounded-full mix-blend-screen filter blur-3xl opacity-20 pointer-events-none animate-pulse" />
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-indigo-600 rounded-full mix-blend-screen filter blur-3xl opacity-20 pointer-events-none animate-pulse" style={{ animationDelay: '2s' }} />
+        <div className="glass-panel p-8 rounded-2xl border border-line flex flex-col items-center gap-4 relative z-10" style={{ background: 'var(--color-glass-panel-bg)', borderColor: 'var(--color-glass-panel-border)' }}>
+          <div className="w-12 h-12 rounded-xl flex items-center justify-center animate-bounce" style={{ background: 'linear-gradient(135deg, var(--color-accent), #a78bfa)' }}>
+            <Loader2 className="w-6 h-6 text-white animate-spin" />
+          </div>
+          <h2 className="text-xl font-bold tracking-tight" style={{ color: 'var(--color-text-primary)', fontFamily: 'Outfit' }}>Verifying Session...</h2>
+          <p className="text-xs text-zinc-400">Securing your codebase exploration environment</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <AuthView onSuccess={(user) => setCurrentUser(user)} />;
+  }
+
   return (
     <main className={`min-h-screen bg-brand-bg text-ink lg:h-screen lg:overflow-hidden ${theme === "light" ? "light-theme" : ""}`}>
       <div className={`mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-0 lg:h-screen transition-all duration-300 ${sidebarCollapsed ? "lg:grid-cols-[0px_1fr]" : "lg:grid-cols-[360px_1fr]"}`}>
@@ -1221,6 +1361,9 @@ export default function Home() {
           isLoadingChats={isLoadingChats}
           busy={busy}
           pendingAction={pendingAction}
+          currentUser={currentUser}
+          githubRepos={githubRepos}
+          loadingGithubRepos={loadingGithubRepos}
           onCreateProject={handleCreateProject}
           onCreateChat={handleCreateChat}
           onDeleteProject={handleDeleteProject}
@@ -1280,6 +1423,19 @@ export default function Home() {
             </div>
 
             <div className="flex items-center gap-2.5">
+              {currentUser && (
+                <div className="flex items-center gap-2.5 border-r border-line/20 pr-2.5">
+                  <div className="flex flex-col items-end hidden sm:flex">
+                    <span className="text-xs font-bold text-zinc-300">{currentUser.username}</span>
+                    {currentUser.has_github && (
+                      <span className="text-[9px] text-purple-400 flex items-center gap-1 font-semibold">
+                        <GithubIcon style={{ width: 10, height: 10 }} /> Linked
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {selectedProject && (
                 <div className="flex items-center gap-2">
                   <span
@@ -1291,7 +1447,7 @@ export default function Home() {
                   >
                     {isActualWriteEnabled ? "Editable" : "Read-only"}
                   </span>
-                  {!isActualWriteEnabled && (
+                  {!isActualWriteEnabled && !currentUser?.has_github && (
                     <button
                       type="button"
                       onClick={handleConnectGitHub}
@@ -1322,6 +1478,16 @@ export default function Home() {
                 title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
               >
                 {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+              </button>
+
+              {/* Settings Toggle */}
+              <button
+                type="button"
+                className="rounded-lg p-2 bg-panel border border-line/25 hover:bg-line/45 text-zinc-400 hover:text-ink transition-all duration-200"
+                onClick={() => setSettingsOpen(true)}
+                title="Open Workspace Settings"
+              >
+                <Settings size={15} />
               </button>
             </div>
           </div>
@@ -1373,6 +1539,7 @@ export default function Home() {
               onApproveReview={handleApprovePlannerReview}
               onCreateCommit={handleCreateCommit}
               onConnectGitHub={handleConnectGitHub}
+              onOpenFile={handleOpenFile}
               onSkipReview={() => {
                 setPlannerChangeSetId("");
                 setPlannerAutomationPrompt("");
@@ -1514,6 +1681,18 @@ export default function Home() {
           )}
         </section>
       </div>
+
+      {currentUser && (
+        <SettingsModal
+          isOpen={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          currentUser={currentUser}
+          onUserUpdate={setCurrentUser}
+          theme={theme}
+          setTheme={setTheme}
+          onLogout={handleLogout}
+        />
+      )}
     </main>
   );
 }

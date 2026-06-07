@@ -3,12 +3,13 @@ from pathlib import Path
 from urllib.parse import urlencode
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Body, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Depends
 from fastapi.responses import RedirectResponse
 import httpx
 
 from app.core.config import settings
 from app.core.database import db
+from app.core.security import get_current_user
 from app.models.schemas import (
     CodeSearchResultResponse,
     CommitAssistantRequest,
@@ -41,19 +42,30 @@ router = APIRouter()
 GITHUB_WRITE_PERMISSIONS = {"admin", "maintain", "write"}
 
 
-def to_project_response(project: dict) -> ProjectResponse:
+def to_project_response(project: dict, user: dict | None = None) -> ProjectResponse:
+    has_github = bool(user.get("github_access_token")) if user else False
+    
+    access_mode = project.get("access_mode", "read_only")
+    if has_github:
+        access_mode = "write_enabled"
+        
+    permissions = project.get("github_permissions") or {"pull": True, "push": False}
+    if has_github:
+        permissions = {"pull": True, "push": True}
+
     return ProjectResponse(
         id=project["_id"],
         name=project["name"],
         repo_url=project["repo_url"],
         status=project["status"],
-        access_mode=project.get("access_mode", "read_only"),
+        access_mode=access_mode,
         auth_provider=project.get("auth_provider"),
         github_owner=project.get("github_owner"),
         github_repo=project.get("github_repo"),
         github_user_login=project.get("github_user_login"),
-        github_permissions=project.get("github_permissions") or {"pull": True, "push": False},
+        github_permissions=permissions,
     )
+
 
 
 def _github_callback_url() -> str:
@@ -71,28 +83,33 @@ def _github_auth_redirect(project_id: str, status: str, message: str = "") -> Re
 async def create_project_endpoint(
     payload: CreateProjectRequest,
     background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user),
 ) -> ProjectResponse:
     try:
-        project = await create_project(payload.name, str(payload.repo_url))
+        project = await create_project(payload.name, str(payload.repo_url), current_user["_id"])
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     background_tasks.add_task(import_project, project["_id"])
 
-    return to_project_response(project)
+    return to_project_response(project, current_user)
 
 
 @router.get("", response_model=list[ProjectResponse])
-async def list_projects() -> list[ProjectResponse]:
+async def list_projects(current_user: dict = Depends(get_current_user)) -> list[ProjectResponse]:
     projects = []
-    async for project in db.projects.find({}).sort("_id", -1):
-        projects.append(to_project_response(project))
+    async for project in db.projects.find({"user_id": current_user["_id"]}).sort("_id", -1):
+        projects.append(to_project_response(project, current_user))
     return projects
 
 
+
 @router.post("/{project_id}/github-auth/start", response_model=GitHubAuthStartResponse)
-async def start_github_project_auth(project_id: str) -> GitHubAuthStartResponse:
-    project = await db.projects.find_one({"_id": project_id})
+async def start_github_project_auth(
+    project_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> GitHubAuthStartResponse:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     if not settings.github_client_id or not settings.github_client_secret:
@@ -127,7 +144,10 @@ async def start_github_project_auth(project_id: str) -> GitHubAuthStartResponse:
 
 
 @router.get("/github-auth/callback")
-async def github_project_auth_callback(code: str, state: str) -> RedirectResponse:
+async def github_project_auth_callback(code: str, state: str | None = None) -> RedirectResponse:
+    if not state:
+        return RedirectResponse(f"{str(settings.frontend_url).rstrip('/')}?code={code}")
+        
     state_doc = await db.github_auth_states.find_one({"_id": state})
     if not state_doc:
         return _github_auth_redirect("", "error", "GitHub permission session expired.")
@@ -197,8 +217,58 @@ async def github_project_auth_callback(code: str, state: str) -> RedirectRespons
     return _github_auth_redirect(project_id, "success")
 
 
+@router.get("/github/repos")
+async def list_github_repos(
+    current_user: dict = Depends(get_current_user),
+) -> list[dict]:
+    token = current_user.get("github_access_token")
+    if not token:
+        raise HTTPException(
+            status_code=400,
+            detail="GitHub account is not connected. Connect GitHub first."
+        )
+
+    try:
+        repos = []
+        async with httpx.AsyncClient(timeout=20) as client:
+            headers = {
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {token}",
+                "X-GitHub-Api-Version": "2022-11-28",
+            }
+            response = await client.get(
+                "https://api.github.com/user/repos?per_page=100&sort=updated",
+                headers=headers,
+            )
+            response.raise_for_status()
+            raw_repos = response.json()
+            for repo in raw_repos:
+                repos.append({
+                    "name": repo.get("name"),
+                    "full_name": repo.get("full_name"),
+                    "html_url": repo.get("html_url"),
+                    "clone_url": repo.get("clone_url"),
+                    "private": repo.get("private"),
+                    "permissions": repo.get("permissions", {}),
+                })
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to fetch repositories from GitHub: {str(exc)}"
+        )
+
+    return repos
+
+
+
 @router.get("/{project_id}/files", response_model=list[FileEntryResponse])
-async def list_project_files(project_id: str) -> list[FileEntryResponse]:
+async def list_project_files(
+    project_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> list[FileEntryResponse]:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     try:
         return await list_files(project_id)
     except ValueError as exc:
@@ -206,19 +276,33 @@ async def list_project_files(project_id: str) -> list[FileEntryResponse]:
 
 
 @router.post("/{project_id}/reindex", response_model=ProjectResponse)
-async def reindex_project_endpoint(project_id: str) -> ProjectResponse:
+async def reindex_project_endpoint(
+    project_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> ProjectResponse:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     try:
-        project = await reindex_project(project_id)
+        updated_project = await reindex_project(project_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return to_project_response(project)
+    return to_project_response(updated_project, current_user)
+
 
 
 @router.get("/{project_id}/files/content", response_model=FileContentResponse)
-async def read_project_file(project_id: str, path: str) -> FileContentResponse:
+async def read_project_file(
+    project_id: str,
+    path: str,
+    current_user: dict = Depends(get_current_user),
+) -> FileContentResponse:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     try:
         return await read_file(project_id, path)
     except FileNotFoundError as exc:
@@ -232,7 +316,11 @@ async def search_project_code(
     project_id: str,
     query: str,
     limit: int = 100,
+    current_user: dict = Depends(get_current_user),
 ) -> list[CodeSearchResultResponse]:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     try:
         return await search_code(project_id, query, limit)
     except ValueError as exc:
@@ -240,7 +328,13 @@ async def search_project_code(
 
 
 @router.get("/{project_id}/git-diff", response_model=GitDiffResponse)
-async def read_project_git_diff(project_id: str) -> GitDiffResponse:
+async def read_project_git_diff(
+    project_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> GitDiffResponse:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     try:
         return await get_git_diff(project_id)
     except ValueError as exc:
@@ -251,7 +345,11 @@ async def read_project_git_diff(project_id: str) -> GitDiffResponse:
 async def preview_project_commit(
     project_id: str,
     payload: CommitAssistantRequest = Body(default_factory=CommitAssistantRequest),
+    current_user: dict = Depends(get_current_user),
 ) -> CommitAssistantResponse:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     try:
         return await prepare_commit(project_id, payload.context)
     except ValueError as exc:
@@ -262,9 +360,13 @@ async def preview_project_commit(
 async def create_project_commit(
     project_id: str,
     payload: CreateCommitRequest,
+    current_user: dict = Depends(get_current_user),
 ) -> CreateCommitResponse:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     try:
-        return await create_commit(project_id, payload.commit_message)
+        return await create_commit(project_id, payload.commit_message, user=current_user)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
@@ -275,10 +377,14 @@ async def create_project_commit(
 async def create_project_edit_change_set(
     project_id: str,
     payload: CreateEditChangeSetRequest,
+    current_user: dict = Depends(get_current_user),
 ) -> EditChangeSetResponse:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     try:
         operations = [operation.model_dump() for operation in payload.operations]
-        return await create_edit_change_set(project_id, operations)
+        return await create_edit_change_set(project_id, operations, user=current_user)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -294,9 +400,13 @@ async def create_project_edit_change_set(
 async def apply_project_edit_change_set(
     project_id: str,
     change_set_id: str,
+    current_user: dict = Depends(get_current_user),
 ) -> EditChangeSetResponse:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     try:
-        return await apply_edit_change_set(project_id, change_set_id)
+        return await apply_edit_change_set(project_id, change_set_id, user=current_user)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -312,7 +422,11 @@ async def apply_project_edit_change_set(
 async def reject_project_edit_change_set(
     project_id: str,
     change_set_id: str,
+    current_user: dict = Depends(get_current_user),
 ) -> EditChangeSetResponse:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     try:
         return await reject_edit_change_set(project_id, change_set_id)
     except FileNotFoundError as exc:
@@ -328,9 +442,13 @@ async def reject_project_edit_change_set(
 async def rollback_project_edit_change_set(
     project_id: str,
     change_set_id: str,
+    current_user: dict = Depends(get_current_user),
 ) -> EditChangeSetResponse:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     try:
-        return await rollback_edit_change_set(project_id, change_set_id)
+        return await rollback_edit_change_set(project_id, change_set_id, user=current_user)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -340,15 +458,18 @@ async def rollback_project_edit_change_set(
 
 
 @router.delete("/{project_id}", status_code=204)
-async def delete_project(project_id: str) -> None:
-    project = await db.projects.find_one({"_id": project_id})
+async def delete_project(
+    project_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> None:
+    project = await db.projects.find_one({"_id": project_id, "user_id": current_user["_id"]})
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
     await db.chat_messages.delete_many({"project_id": project_id})
     await db.chats.delete_many({"project_id": project_id})
     await db.edit_change_sets.delete_many({"project_id": project_id})
-    await db.projects.delete_one({"_id": project_id})
+    await db.projects.delete_one({"_id": project_id, "user_id": current_user["_id"]})
 
     await delete_collection(project_id)
 

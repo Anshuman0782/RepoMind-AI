@@ -32,6 +32,7 @@ type ChatViewProps = {
   onSkipReview: () => void;
   onCreateCommit: () => void;
   onConnectGitHub: () => void;
+  onOpenFile: (path: string) => void;
 };
 
 export function ChatView({
@@ -60,6 +61,7 @@ export function ChatView({
   onSkipReview,
   onCreateCommit,
   onConnectGitHub,
+  onOpenFile,
 }: ChatViewProps) {
   const projectStatus = selectedProject?.status ?? "";
   const isProjectBusy = projectStatus === "importing" || projectStatus === "indexing";
@@ -118,7 +120,7 @@ export function ChatView({
                     ) : null}
                   </div>
 
-                  <AnswerContent answer={item.answer} />
+                  <AnswerContent answer={item.answer} onOpenFile={onOpenFile} />
 
                   {/* Dynamic Action Handlers */}
                   {item.actionChangeSetId && activeEditChangeSet?.id === item.actionChangeSetId ? (

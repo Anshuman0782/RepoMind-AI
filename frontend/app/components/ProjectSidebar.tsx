@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent } from "react";
-import { ChatSession, Project } from "@/lib/api";
+import { ChatSession, Project, User, GitHubRepo } from "@/lib/api";
 import { X, FolderPlus, Layers, Trash2, Plus, MessageSquare, Edit2, RotateCw } from "lucide-react";
 
 type ProjectSidebarProps = {
@@ -31,6 +31,9 @@ type ProjectSidebarProps = {
   setProjectSearch: (value: string) => void;
   setEditingChatId: (value: string) => void;
   setEditingTitle: (value: string) => void;
+  currentUser?: User | null;
+  githubRepos?: GitHubRepo[];
+  loadingGithubRepos?: boolean;
   // Responsive sidebar toggles
   mobileOpen?: boolean;
   onCloseMobile?: () => void;
@@ -64,6 +67,9 @@ export function ProjectSidebar({
   setProjectSearch,
   setEditingChatId,
   setEditingTitle,
+  currentUser,
+  githubRepos,
+  loadingGithubRepos,
   mobileOpen = false,
   onCloseMobile,
   collapsed = false,
@@ -128,6 +134,46 @@ export function ProjectSidebar({
             <FolderPlus size={11} className="text-accent" />
             Import Repository
           </span>
+          {currentUser?.has_github && githubRepos && githubRepos.length > 0 ? (
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider px-1">
+                Select from GitHub Repositories
+              </label>
+              <select
+                className="w-full rounded-lg border border-line/50 bg-brand-bg px-3 py-2 text-xs text-ink outline-none focus:border-accent transition-all cursor-pointer"
+                onChange={(event) => {
+                  const selectedVal = event.target.value;
+                  if (selectedVal) {
+                    const selectedRepo = githubRepos.find(r => r.clone_url === selectedVal);
+                    if (selectedRepo) {
+                      setRepoUrl(selectedRepo.clone_url);
+                      setName(selectedRepo.name);
+                    }
+                  } else {
+                    setRepoUrl("");
+                    setName("");
+                  }
+                }}
+                defaultValue=""
+              >
+                <option value="" style={{ background: 'var(--color-brand-bg)' }}>-- Select a GitHub Repo --</option>
+                {githubRepos.map((repo) => (
+                  <option 
+                    key={repo.clone_url} 
+                    value={repo.clone_url}
+                    style={{ background: 'var(--color-brand-bg)' }}
+                  >
+                    {repo.full_name} {repo.private ? "🔒" : "🌐"}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : loadingGithubRepos ? (
+            <div className="flex items-center justify-center py-2 text-xs text-zinc-500 gap-1.5 animate-pulse">
+              <RotateCw size={11} className="animate-spin" />
+              <span>Loading your repositories...</span>
+            </div>
+          ) : null}
           <input
             className="w-full rounded-lg border border-line/50 bg-brand-bg px-3 py-2 text-xs text-ink placeholder-zinc-500 outline-none focus:border-accent transition-all"
             placeholder="Project display name"
@@ -219,14 +265,18 @@ export function ProjectSidebar({
                         <span className="truncate max-w-[140px] text-zinc-500">{project.repo_url}</span>
                         <span
                           className={`rounded px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider ${
-                            project.access_mode === "write_enabled" &&
-                            project.github_permissions?.push
+                            currentUser?.has_github || (
+                              project.access_mode === "write_enabled" &&
+                              project.github_permissions?.push
+                            )
                               ? "bg-emerald-900/20 text-emerald-400"
                               : "bg-amber-900/20 text-amber-400"
                           }`}
                         >
-                          {project.access_mode === "write_enabled" &&
-                          project.github_permissions?.push
+                          {currentUser?.has_github || (
+                            project.access_mode === "write_enabled" &&
+                            project.github_permissions?.push
+                          )
                             ? "Editable"
                             : "Read-only"}
                         </span>
